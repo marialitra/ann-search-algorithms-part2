@@ -14,8 +14,6 @@ other. Use `--distance` to instead use the numeric distance values found in
 the file (default behavior previously).
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re
@@ -26,20 +24,17 @@ import numpy as np
 import kahip
 
 
-def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+def parse_neighbor_file(path: str) -> Dict[int, List[int]]:
     """Parse the neighbor file.
 
     Returns:
         neighbors: dict query -> list of neighbor ids (ints) in order
-        weights: dict query -> list of weights (floats) aligned with neighbors
     """
     neighbors: Dict[int, List[int]] = {}
-    weights: Dict[int, List[float]] = {}
 
     # regex helpers
     q_re = re.compile(r"^Query:\s*(\d+)")
     nn_re = re.compile(r"^Nearest neighbor-\d+:\s*(\d+)")
-    d_re = re.compile(r"^distanceApproximate:\s*([0-9.+-eE]+)")
 
     current_q = None
     # temporary index to align distances
@@ -52,30 +47,18 @@ def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], Dict[int, List
             if m:
                 current_q = int(m.group(1))
                 neighbors[current_q] = []
-                weights[current_q] = []
                 continue
 
             m = nn_re.match(line)
             if m and current_q is not None:
                 nid = int(m.group(1))
                 neighbors[current_q].append(nid)
-                # placeholder for the distance value which should follow
-                weights[current_q].append(np.nan)
                 continue
 
-            m = d_re.match(line)
-            if m and current_q is not None:
-                val = float(m.group(1))
-                # assign to last appended weight
-                if neighbors[current_q]:
-                    weights[current_q][-1] = val
-                continue
-
-    return neighbors, weights
+    return neighbors
 
 
-def build_csr_from_neighbors(neighbors: Dict[int, List[int]], weights: Dict[int, List[float]],
-                                symmetric: bool = False):
+def build_csr_from_neighbors(neighbors: Dict[int, List[int]],symmetric: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     # compute node count
     max_node = -1
     for q, nbrs in neighbors.items():
@@ -89,19 +72,13 @@ def build_csr_from_neighbors(neighbors: Dict[int, List[int]], weights: Dict[int,
 
     rows = []
     cols = []
-    data = []
     for q, nbrs in neighbors.items():
-        ws = weights.get(q, [])
         for i, nb in enumerate(nbrs):
             rows.append(q)
             cols.append(nb)
-            # if weight is nan (missing), default to 1.0; otherwise use the distance
-            w = ws[i] if i < len(ws) else np.nan
-            data.append(w if not np.isnan(w) else 1.0)
 
-    rows = np.array(rows, dtype=np.int64)
-    cols = np.array(cols, dtype=np.int64)
-    data = np.array(data, dtype=np.float64)
+    rows = np.array(rows, dtype=np.int32)
+    cols = np.array(cols, dtype=np.int32)
 
     # Build a presence set from original directed edges
     presence = set((int(r), int(c)) for r, c in zip(rows.tolist(), cols.tolist()))
@@ -131,9 +108,9 @@ def build_csr_from_neighbors(neighbors: Dict[int, List[int]], weights: Dict[int,
         out_cols.append(c)
         out_data.append(v)
 
-    rows = np.array(out_rows, dtype=np.int64)
-    cols = np.array(out_cols, dtype=np.int64)
-    data = np.array(out_data, dtype=np.float64)
+    rows = np.array(out_rows, dtype=np.int32)
+    cols = np.array(out_cols, dtype=np.int32)
+    data = np.array(out_data, dtype=np.int32)
 
     order = np.lexsort((cols, rows))
     rows = rows[order]
@@ -152,9 +129,13 @@ def build_csr_from_neighbors(neighbors: Dict[int, List[int]], weights: Dict[int,
         cols = cols[keep]
         data = data[keep]
 
-    indptr = np.zeros(n + 1, dtype=np.int64)
-    np.cumsum(np.bincount(rows, minlength=n), out=indptr[1:])
-    return indptr, cols, data
+   
+
+    indptr = np.zeros(n + 1, dtype=np.int32)
+    np.cumsum(np.bincount(rows, minlength=n), out=indptr[1:]) 
+
+    vwgt = np.ones(indptr.shape[0]-1, dtype=np.int32)
+    return indptr, cols, data, vwgt
 
 
 def main():
@@ -169,24 +150,17 @@ def main():
     if not os.path.exists(inp):
         raise SystemExit(f"File not found: {inp}")
 
-    neighbors, weights = parse_neighbor_file(inp)
+    neighbors = parse_neighbor_file(inp)
     print(f"Parsed {len(neighbors)} queries. Building adjacency...")
 
-    # Default behavior: mutual weighting (1 if single-direction, 2 if mutual)
-    weight_mode = "mutual" if not args.distance else "distance"
-    adj = build_csr_from_neighbors(neighbors, weights, symmetric=args.symmetric,)
+    # mutual weighting (1 if single-direction, 2 if mutual)
+    adj = build_csr_from_neighbors(neighbors, symmetric=args.symmetric)
 
 
     # vertex weights all 1
-    indptr, indices, data = adj
-    vwgt = np.ones(indptr.shape[0]-1, dtype=np.int32)
+    xadj, adjncy, adjwgt, vwgt = adj
+    
 
-    # Kahip expects integer arrays for adjacency pointers, adjacency indices and edge weights.
-    # Cast to int32 to avoid pybind11 casting errors.
-    xadj = indptr.astype(np.int32)
-    adjncy = indices.astype(np.int32)
-
-    adjwgt = data.astype(np.int32)
 
     N_BLOCKS = 10
     IMBALANCE = 0.03
