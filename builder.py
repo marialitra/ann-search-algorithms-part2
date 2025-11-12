@@ -1,30 +1,13 @@
-#!/usr/bin/env python3
-"""Parse neighbor graph text files (the "Query:/Nearest neighbor-#/distanceApproximate" style)
-and build an adjacency matrix in CSR format WITHOUT SciPy.
-
-Outputs (saved next to input file):
- - <input>.indptr.npy
- - <input>.indices.npy
- - <input>.data.npy
-
-This script always produces the three CSR arrays using NumPy. By default the
-weighting rule is "mutual": an undirected adjacency where an edge weight is
-1.0 if only one direction exists (a->b or b->a) and 2.0 if both list each
-other. Use `--distance` to instead use the numeric distance values found in
-the file (default behavior previously).
-"""
-
 import argparse
 import os
 import re
-from collections import defaultdict
 from typing import Dict, List, Tuple
 
 import numpy as np
 import kahip
 
 
-def parse_neighbor_file(path: str) -> Dict[int, List[int]]:
+def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], int]:
     """Parse the neighbor file.
 
     Returns:
@@ -55,112 +38,54 @@ def parse_neighbor_file(path: str) -> Dict[int, List[int]]:
                 neighbors[current_q].append(nid)
                 continue
 
-    return neighbors
+    return neighbors, len(neighbors)
 
 
-def build_csr_from_neighbors(neighbors: Dict[int, List[int]],symmetric: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    # compute node count
-    max_node = -1
-    for q, nbrs in neighbors.items():
-        if q > max_node:
-            max_node = q
-        if nbrs:
-            m = max(nbrs)
-            if m > max_node:
-                max_node = m
-    n = max_node + 1
+def build_csr_from_neighbors(neighbors: Dict[int, List[int]], datasetsize: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
-    rows = []
-    cols = []
-    for q, nbrs in neighbors.items():
-        for i, nb in enumerate(nbrs):
-            rows.append(q)
-            cols.append(nb)
-
-    rows = np.array(rows, dtype=np.int32)
-    cols = np.array(cols, dtype=np.int32)
-
-    # Build a presence set from original directed edges
-    presence = set((int(r), int(c)) for r, c in zip(rows.tolist(), cols.tolist()))
-
-    result: Dict[Tuple[int, int], float] = {}
-    for (i, j) in presence:
-        if i == j:
-            # self-loops should be zero per user request
-            w = 0.0
-            result[(i, j)] = w
-            # don't duplicate for (j,i) since it's the same
-        elif (j, i) in presence:
-            w = 2.0
-            # mutual: set both directions to 2.0
-            result[(i, j)] = w
-            result[(j, i)] = w
-        else:
-            w = 1.0
-            result[(i, j)] = w
-            result[(j, i)] = w
-
-    out_rows = []
+    # build edge weight map
+    array = np.zeros((datasetsize, datasetsize), dtype=np.int32)
+    for qid, nlist in neighbors.items():
+        for nid in nlist:
+            if qid == nid:
+                continue
+            array[qid, nid] += 1
+            array[nid, qid] += 1 
+    # for r in range(datasetsize):
+    #     for c in range(datasetsize):
+    #         if array[r, c] > 0:
+    #             print(f"({r} {c}) = {array[r,c]}", end ="\t")
+    #     print()
+    result = array.nonzero()
+    rows, cols = result
     out_cols = []
     out_data = []
-    for (r, c), v in result.items():
-        out_rows.append(r)
+    for r, c in zip(rows, cols):
         out_cols.append(c)
-        out_data.append(v)
+        out_data.append(array[r, c])
 
-    rows = np.array(out_rows, dtype=np.int32)
-    cols = np.array(out_cols, dtype=np.int32)
-    data = np.array(out_data, dtype=np.int32)
+    xadj = np.zeros(datasetsize + 1, dtype=np.int32)
+    np.cumsum(np.bincount(rows, minlength=datasetsize), out=xadj[1:]) 
+    adjncy = np.array(out_cols, dtype=np.int32)
+    adjwgt = np.array(out_data, dtype=np.int32)
+    vwgt = np.ones(xadj.shape[0]-1, dtype=np.int32)
 
-    order = np.lexsort((cols, rows))
-    rows = rows[order]
-    cols = cols[order]
-    data = data[order]
-
-    # ensure self-loop entries have zero weight
-    mask_self = rows == cols
-    if mask_self.any():
-        data[mask_self] = 0.0
-
-    # remove zero-valued entries (drop self-loops entirely)
-    keep = data != 0.0
-    if not np.all(keep):
-        rows = rows[keep]
-        cols = cols[keep]
-        data = data[keep]
-
-   
-
-    indptr = np.zeros(n + 1, dtype=np.int32)
-    np.cumsum(np.bincount(rows, minlength=n), out=indptr[1:]) 
-
-    vwgt = np.ones(indptr.shape[0]-1, dtype=np.int32)
-    return indptr, cols, data, vwgt
+    return xadj, adjncy, adjwgt, vwgt
 
 
 def main():
     p = argparse.ArgumentParser(description="Build adjacency matrix (CSR) from neighbor TXT files.")
     p.add_argument("input", help="path to neighbor TXT file")
-    p.add_argument("--symmetric", action="store_true", help="symmetrize (make undirected)")
-    p.add_argument("--mutual", action="store_true", help="build weights as 1 if one-way, 2 if mutual (symmetrized)")
-    p.add_argument("--distance", action="store_true", help="use numeric distances from file as weights instead of mutual binary weights")
     args = p.parse_args()
 
     inp = args.input
     if not os.path.exists(inp):
         raise SystemExit(f"File not found: {inp}")
 
-    neighbors = parse_neighbor_file(inp)
-    print(f"Parsed {len(neighbors)} queries. Building adjacency...")
+    neighbors, datasetsize = parse_neighbor_file(inp)
+    print(f"Parsed {datasetsize} queries. Building adjacency...")
 
-    # mutual weighting (1 if single-direction, 2 if mutual)
-    adj = build_csr_from_neighbors(neighbors, symmetric=args.symmetric)
-
-
-    # vertex weights all 1
-    xadj, adjncy, adjwgt, vwgt = adj
-    
-
+    xadj, adjncy, adjwgt, vwgt = build_csr_from_neighbors(neighbors, datasetsize)
 
     N_BLOCKS = 10
     IMBALANCE = 0.03
@@ -171,10 +96,6 @@ def main():
     print(f"Partitioned graph into {N_BLOCKS} blocks with edgecut {edgecut}.")
     print(blocks[:20])
     
-
-    
-    
-    # Save the three CSR arrays (no SciPy dependency)
 
 
 if __name__ == "__main__":
