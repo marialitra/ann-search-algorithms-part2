@@ -1,117 +1,49 @@
 import torch
 import torch.nn as nn
-
-# Minimal, dependency-free replacement for sklearn.model_selection.train_test_split
-# This avoids importing sklearn/pandas (which can trigger binary ABI issues
-# with system-installed compiled packages). It supports `test_size` as float
-# fraction or int count, `random_state` for reproducible shuffling, and an
-# optional `stratify` array to preserve class proportions approximately.
-import numpy as _np
-
-
-def train_test_split(X, y, test_size=0.1, random_state=None, stratify=None):
-    """Return (X_train, X_test, y_train, y_test) using NumPy only.
-
-    Parameters:
-    - X: array-like, shape (n_samples, ...)
-    - y: array-like, shape (n_samples,)
-    - test_size: float in (0,1) fraction or int number of test samples
-    - random_state: int or None for RNG seed
-    - stratify: array-like of labels to stratify by (optional)
-    """
-    X = _np.asarray(X)
-    y = _np.asarray(y)
-    n = X.shape[0]
-    if isinstance(test_size, float):
-        test_n = int(n * test_size)
-    else:
-        test_n = int(test_size)
-
-    if random_state is not None:
-        rng = _np.random.RandomState(random_state)
-    else:
-        rng = _np.random
-
-    if stratify is None:
-        idx = _np.arange(n)
-        rng.shuffle(idx)
-    else:
-        labels = _np.asarray(stratify)
-        uniq = _np.unique(labels)
-        parts = []
-        for u in uniq:
-            ids = _np.where(labels == u)[0]
-            # shuffle in-place using the RNG
-            ids = ids.copy()
-            rng.shuffle(ids)
-            parts.append(ids)
-        idx = _np.concatenate(parts) if parts else _np.arange(n)
-
-    if test_n <= 0:
-        return X, _np.empty((0,) + X.shape[1:]), y, _np.empty((0,), dtype=y.dtype)
-
-    test_idx = idx[:test_n]
-    train_idx = idx[test_n:]
-    return X[train_idx], X[test_idx], y[train_idx], y[test_idx]
-
-# Define a simple feedforward neural network (MLP) 
-class MLPClassifier(nn.Module): 
-    def __init__(self, d_in, n_out, neurons, n_layers): 
-        super().__init__() 
-
-        layers = []
-        layers.append(nn.Linear(d_in, neurons))
-        layers.append(nn.ReLU())
-        for _ in range(n_layers - 2):
-            layers.append(nn.Linear(neurons, neurons))
-            layers.append(nn.ReLU())
-
-        layers.append(nn.Linear(neurons, n_out))
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x): 
-        # Forward pass through the network 
-        return self.net(x)
-
-
-
-# kfolds, regularization, dropout, cnn and pooling
-import torch
-import torch.nn as nn
 import numpy as np
 
-# Local KFold replacement to avoid depending on sklearn (prevents importing
-# sklearn/pandas which can trigger binary incompatibilities in some systems).
-class KFold:
-    def __init__(self, n_splits=4, shuffle=False, random_state=None):
-        self.n_splits = n_splits
-        self.shuffle = shuffle
-        self.random_state = random_state
+from torch.cuda.amp import autocast, GradScaler as scaler
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold
 
-    def get_n_splits(self):
-        return self.n_splits
+# Define a simple feedforward neural network (MLP) 
+# class MLPClassifier(nn.Module): 
+#     def __init__(self, d_in, n_out, neurons, n_layers): 
+#         super().__init__() 
 
-    def split(self, X):
-        n = len(X)
-        idx = np.arange(n)
-        rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
-        if self.shuffle:
-            rng.shuffle(idx)
-        fold_sizes = (n // self.n_splits) * np.ones(self.n_splits, dtype=int)
-        remainder = n % self.n_splits
-        for i in range(remainder):
-            fold_sizes[i] += 1
-        current = 0
-        for fold_size in fold_sizes:
-            start = current
-            stop = current + fold_size
-            test_idx = idx[start:stop]
-            if start > 0 or stop < n:
-                train_idx = np.concatenate([idx[:start], idx[stop:]])
-            else:
-                train_idx = np.array([], dtype=int)
-            yield train_idx, test_idx
-            current = stop
+#         layers = []
+#         layers.append(nn.Linear(d_in, neurons))
+#         layers.append(nn.ReLU())
+#         for _ in range(n_layers - 2):
+#             layers.append(nn.Linear(neurons, neurons))
+#             layers.append(nn.ReLU())
+
+#         layers.append(nn.Linear(neurons, n_out))
+#         self.net = nn.Sequential(*layers)
+
+#     def forward(self, x): 
+#         # Forward pass through the network 
+#         return self.net(x)
+
+
+# Define MLP
+class MLPClassifier(nn.Module):
+    def __init__(self, d_in, n_out, hidden_size, n_layers, dropout):
+        super().__init__()
+        layers = []
+        layers.append(nn.Linear(d_in, hidden_size))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        for _ in range(n_layers - 2):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+        layers.append(nn.Linear(hidden_size, n_out))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
 
 # --- CNN Classifier for Image Data ---
 class CNNClassifier(nn.Module):
@@ -161,7 +93,7 @@ class CNNClassifier(nn.Module):
         return self.classifier(x)
 
 
-def train_model(args, img_rows, img_cols, X, y):
+def mnist_train(args, img_rows, img_cols, X, y):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # --- Configuration for Regularization ---
@@ -269,6 +201,110 @@ def train_model(args, img_rows, img_cols, X, y):
             total_loss += loss.item()
         
         print(f"[Final Model] Epoch {epoch+1}/{args.epochs} - Loss: {total_loss/len(full_loader):.4f}")
+
+    model = model.to("cpu")
+    return model
+
+
+def sift_train(args, img_rows, img_cols, X, y):
+
+    """
+    Lightweight and GPU-optimized training for large SIFT1M dataset.
+    Uses a single train/val split instead of K-fold to reduce cost.
+    """
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Normalize SIFT features (important!)
+    X = X / np.linalg.norm(X, axis=1, keepdims=True)
+
+    # Split train/val once
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.1, random_state=42)
+
+    # --- Configuration ---
+    dropout_rate = getattr(args, "dropout_rate", 0.2)
+    weight_decay = getattr(args, "weight_decay", 1e-5)
+    patience = getattr(args, "patience", 3)
+
+    model = MLPClassifier(
+        d_in=X.shape[1],
+        n_out=args.m,
+        hidden_size=args.nodes,
+        n_layers=args.layers,
+        dropout=dropout_rate
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
+    loss_fn = nn.CrossEntropyLoss()
+
+    # DataLoaders
+    train_ds = torch.utils.data.TensorDataset(
+        torch.from_numpy(X_train.copy()).float(),
+        torch.from_numpy(y_train.copy()).long()
+    )
+    val_ds = torch.utils.data.TensorDataset(
+        torch.from_numpy(X_val.copy()).float(),
+        torch.from_numpy(y_val.copy()).long()
+    )
+
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size, num_workers=4, pin_memory=True)
+
+    best_val_loss = float("inf")
+    patience_counter = 0
+    best_state = None
+
+
+    print(f"Training on {len(X_train)} samples, validating on {len(X_val)}.")
+
+    for epoch in range(args.epochs):
+        model.train()
+        total_train_loss = 0.0
+
+        for xb, yb in train_loader:
+            xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
+            optimizer.zero_grad()
+
+            # ✅ forward pass under autocast (mixed precision)
+            with autocast(enabled=(device.type == "cuda")):
+                logits = model(xb)
+                loss = loss_fn(logits, yb)
+
+            # ✅ backward pass via GradScaler
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            total_train_loss += loss.item()
+
+        avg_train_loss = total_train_loss / len(train_loader)
+
+        # Validation
+        model.eval()
+        total_val_loss = 0.0
+        with torch.no_grad():
+            for xb, yb in val_loader:
+                xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
+                with autocast(enabled=(device.type == "cuda")):
+                    val_loss = loss_fn(model(xb), yb)
+                total_val_loss += val_loss.item()
+        avg_val_loss = total_val_loss / len(val_loader)
+
+        print(f"Epoch {epoch+1}/{args.epochs} - Train: {avg_train_loss:.4f}, Val: {avg_val_loss:.4f}")
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            best_state = model.state_dict()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("Early stopping triggered.")
+                break
+
+    model.load_state_dict(best_state)
+    print(f"Best val loss: {best_val_loss:.4f}")
 
     model = model.to("cpu")
     return model

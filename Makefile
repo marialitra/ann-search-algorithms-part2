@@ -6,16 +6,16 @@ SCRIPT := builder.py
 
 # Example arguments for running the script.
 # NOTE: You need to replace these paths and values with actual files and desired settings.
-INPUT_FILE := ./knngraphs/mnistfullivfflat5testset.txt
-DATASET_FILE := ./Data/MNIST/train-images.idx3-ubyte
+INPUT_FILE := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
+DATASET_FILE := ./Data/SIFT/sift_base.fvecs
 OUTPUT_FILE:= nlsh_index
-DATASET_TYPE := MNIST
-NUM_BLOCKS := 2000
+DATASET_TYPE := sift
+NUM_BLOCKS := 10
 NUM_LAYERS := 5
 NUM_NEURONS := 512
 LEARNING_RATE := 0.001
 EPOCHS := 20
-BATCH_SIZE := 256
+BATCH_SIZE := 32
 
 
 # --- Targets ---
@@ -55,8 +55,9 @@ help:
 
 search:
 	python3 nlsh_search.py \
-  -d ./Data/MNIST/train-images.idx3-ubyte \
-  -q ./Data/MNIST/t10k-images.idx3-ubyte \
+  -d ./Data/SIFT/sift_base.fvecs \
+  -q ./Data/SIFT/sift_query.fvecs \
   -i nlsh_index \
   -o output.txt \
-  -N 4 -T 200 -range FALSE
+  -type sift \
+  -N 4 -T 5 -range FALSE

@@ -12,7 +12,8 @@ import kahip
 import torch
 import torch.nn as nn
 
-from neural_net import train_model
+from neural_net import mnist_train
+from neural_net import sift_train
 
 from typing import Dict, List, Tuple
 from collections import Counter as counter
@@ -167,66 +168,73 @@ def read_fvecs(path: str) -> np.ndarray:
         return np.zeros((0, 0), dtype=np.float32)
     return np.vstack(vecs)
 
+# def load_sift_vectors(filepath: str) -> Tuple[np.ndarray, int, int, int]:
+#     """Load SIFT vectors from common binary formats (.fvecs, .bvecs) and return
+#     a 4D tensor shaped (n, 1, 1, dim) to be compatible with the image pipeline.
 
-# def read_bvecs(path: str) -> np.ndarray:
-#     """Read .bvecs file (each vector stored as: int32 dim, uint8 dim values).
-
-#     Returns a numpy array of shape (n, dim) dtype uint8.
+#     Returns: (data_vectors, num_vectors, rows, cols) where rows=1 and cols=dim.
 #     """
-#     vecs = []
-#     with open(path, 'rb') as fh:
-#         while True:
-#             hdr = fh.read(4)
-#             if not hdr:
-#                 break
-#             d = struct.unpack('i', hdr)[0]
-#             buf = fh.read(d)
-#             if len(buf) != d:
-#                 raise EOFError(f"Unexpected EOF while reading {path}")
-#             arr = np.frombuffer(buf, dtype=np.uint8).copy()
-#             vecs.append(arr)
-#     if not vecs:
-#         return np.zeros((0, 0), dtype=np.uint8)
-#     return np.vstack(vecs)
+#     if not os.path.exists(filepath):
+#         raise FileNotFoundError(f"SIFT file not found: {filepath}")
+
+#     lower = filepath.lower()
+#     # For large .fvecs/.bvecs files we convert to a .npy memmap (if not already)
+#     # and then load with mmap_mode='r' so downstream code can slice without
+#     # loading the entire array into memory.
+#     if lower.endswith('.fvecs'):
+#         from memmap_utils import fvecs_to_npy_memmap
+#         npy_path = fvecs_to_npy_memmap(filepath, filepath + '.npy')
+#         mat = np.load(npy_path, mmap_mode='r')
+#     elif lower.endswith('.bvecs'):
+#         from memmap_utils import bvecs_to_npy_memmap
+#         npy_path = bvecs_to_npy_memmap(filepath, filepath + '.npy')
+#         mat = np.load(npy_path, mmap_mode='r')
+#     else:
+#         # try numpy or text (small files)
+#         try:
+#             mat = np.load(filepath, mmap_mode='r')
+#             if mat.ndim == 1:
+#                 # maybe saved as flat array
+#                 raise ValueError("Unsupported numpy shape for SIFT data")
+#         except Exception:
+#             # fallback: try whitespace-separated (will load fully into memory)
+#             mat = np.loadtxt(filepath)
+
+#     n, dim = mat.shape
+#     # reshape to (n, 1, 1, dim) so downstream code that expects images works
+#     # For memmap arrays this returns a view that will still be backed by disk.
+#     data_vectors = mat.reshape(n, 1, 1, dim)
+#     return data_vectors, n, 1, dim
 
 
-def load_sift_vectors(filepath: str) -> Tuple[np.ndarray, int, int, int]:
-    """Load SIFT vectors from common binary formats (.fvecs, .bvecs) and return
-    a 4D tensor shaped (n, 1, 1, dim) to be compatible with the image pipeline.
 
-    Returns: (data_vectors, num_vectors, rows, cols) where rows=1 and cols=dim.
+def load_sift_vectors(filepath: str, dtype=np.float32) -> tuple[np.memmap, int, int, int]:
     """
+    Memory-efficient loader for huge SIFT .fvecs files.
+    Returns a NumPy memmap array view backed by disk.
+    """
+    print(f"Loading (memmap) SIFT vectors from {filepath} ...")
     if not os.path.exists(filepath):
-        raise FileNotFoundError(f"SIFT file not found: {filepath}")
+        raise FileNotFoundError(filepath)
 
-    lower = filepath.lower()
-    # For large .fvecs/.bvecs files we convert to a .npy memmap (if not already)
-    # and then load with mmap_mode='r' so downstream code can slice without
-    # loading the entire array into memory.
-    if lower.endswith('.fvecs'):
-        from memmap_utils import fvecs_to_npy_memmap
-        npy_path = fvecs_to_npy_memmap(filepath, filepath + '.npy')
-        mat = np.load(npy_path, mmap_mode='r')
-    elif lower.endswith('.bvecs'):
-        from memmap_utils import bvecs_to_npy_memmap
-        npy_path = bvecs_to_npy_memmap(filepath, filepath + '.npy')
-        mat = np.load(npy_path, mmap_mode='r')
-    else:
-        # try numpy or text (small files)
-        try:
-            mat = np.load(filepath, mmap_mode='r')
-            if mat.ndim == 1:
-                # maybe saved as flat array
-                raise ValueError("Unsupported numpy shape for SIFT data")
-        except Exception:
-            # fallback: try whitespace-separated (will load fully into memory)
-            mat = np.loadtxt(filepath)
+    # Determine dimension
+    dim = int(np.fromfile(filepath, dtype=np.int32, count=1)[0])
+    item_size = 4 * (dim + 1)  # each vector = int32 + dim*float32
 
-    n, dim = mat.shape
-    # reshape to (n, 1, 1, dim) so downstream code that expects images works
-    # For memmap arrays this returns a view that will still be backed by disk.
-    data_vectors = mat.reshape(n, 1, 1, dim)
-    return data_vectors, n, 1, dim
+    # Get file size in bytes to compute n_vectors
+    file_size = os.path.getsize(filepath)
+    n_vectors = file_size // item_size
+    print(f"Detected {n_vectors} vectors, each dim={dim} (total {file_size/1e6:.1f} MB).")
+
+    # Memory-map file as float32
+    data = np.memmap(filepath, dtype=np.float32, mode='r')
+    data = data.reshape(n_vectors, dim + 1)
+    vectors = data[:, 1:].astype(dtype)
+
+    vectors = vectors.reshape(n_vectors, 1, 1, dim)
+    return vectors, n_vectors, 1, dim
+
+
 
 
 def save_output(model: nn.Module, out_dir: str, X: np.ndarray, y: np.ndarray, img_rows: int, img_cols: int):
@@ -304,8 +312,13 @@ def main():
     X = data_vectors    # shape (n, 1, rows, cols)
     y = np.array(blocks)  # labels from KaHIP
     
-    # Train the new CNN model, passing image dimensions
-    model = train_model(args, img_rows, img_cols, X, y)
+
+    if dataset_type and dataset_type.lower().startswith('sift'):
+        model = sift_train(args, img_rows, img_cols, X, y)
+    else:
+        # Train the new CNN model, passing image dimensions
+        model = mnist_train(args, img_rows, img_cols, X, y)
+
     os.makedirs(args.i, exist_ok=True)
 
     # Save the model and the inverted index file
