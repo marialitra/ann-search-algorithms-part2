@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 from typing import Dict, List, Tuple
+from collections import Counter as counter
 
 import numpy as np
 import kahip
@@ -44,32 +45,46 @@ def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], int]:
 def build_csr_from_neighbors(neighbors: Dict[int, List[int]], datasetsize: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
     # build edge weight map
-    array = np.zeros((datasetsize, datasetsize), dtype=np.int32)
+    array = {}
     for qid, nlist in neighbors.items():
         for nid in nlist:
             if qid == nid:
                 continue
-            array[qid, nid] += 1
-            array[nid, qid] += 1 
-    # for r in range(datasetsize):
-    #     for c in range(datasetsize):
-    #         if array[r, c] > 0:
-    #             print(f"({r} {c}) = {array[r,c]}", end ="\t")
-    #     print()
-    result = array.nonzero()
-    rows, cols = result
+            array[(qid, nid)] = array.get((qid, nid), 0) + 1
+            array[(nid, qid)] = array.get((nid, qid), 0) + 1
+    sorted_values = dict(sorted(array.items(), key=lambda item: item[0][0]))
+    print(sorted_values)
     out_cols = []
     out_data = []
-    for r, c in zip(rows, cols):
+
+    for r, c in sorted_values.keys():
         out_cols.append(c)
-        out_data.append(array[r, c])
+        out_data.append(sorted_values[r, c])
+
+
+    rows = [k[0] for k in array.keys()]
+    counts = counter(rows)
 
     xadj = np.zeros(datasetsize + 1, dtype=np.int32)
-    np.cumsum(np.bincount(rows, minlength=datasetsize), out=xadj[1:]) 
-    adjncy = np.array(out_cols, dtype=np.int32)
-    adjwgt = np.array(out_data, dtype=np.int32)
-    vwgt = np.ones(xadj.shape[0]-1, dtype=np.int32)
 
+    cum = 0
+    for i in range(datasetsize):
+        xadj[i] = cum 
+        cum += counts.get(i, 0)
+    xadj[datasetsize] = cum
+
+    # print("xadj:")
+    # print(xadj)
+
+    adjncy = np.array(out_cols, dtype=np.int32)
+    # print("adjncy")
+    # print(adjncy)
+    adjwgt = np.array(out_data, dtype=np.int32)
+    # print("adjwgt")
+    # print(adjwgt)
+    vwgt = np.ones(datasetsize, dtype=np.int32)
+    # print("vwgt")
+    # print(vwgt)
     return xadj, adjncy, adjwgt, vwgt
 
 
@@ -94,7 +109,7 @@ def main():
     # Call kahip partitioner
     edgecut, blocks = kahip.kaffpa(vwgt, xadj, adjwgt, adjncy, N_BLOCKS, IMBALANCE, True, SEED, 1)
     print(f"Partitioned graph into {N_BLOCKS} blocks with edgecut {edgecut}.")
-    print(blocks[:20])
+    print(blocks)
     
 
 
