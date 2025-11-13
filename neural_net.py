@@ -1,7 +1,58 @@
 import torch
 import torch.nn as nn
 
-from sklearn.model_selection import train_test_split
+# Minimal, dependency-free replacement for sklearn.model_selection.train_test_split
+# This avoids importing sklearn/pandas (which can trigger binary ABI issues
+# with system-installed compiled packages). It supports `test_size` as float
+# fraction or int count, `random_state` for reproducible shuffling, and an
+# optional `stratify` array to preserve class proportions approximately.
+import numpy as _np
+
+
+def train_test_split(X, y, test_size=0.1, random_state=None, stratify=None):
+    """Return (X_train, X_test, y_train, y_test) using NumPy only.
+
+    Parameters:
+    - X: array-like, shape (n_samples, ...)
+    - y: array-like, shape (n_samples,)
+    - test_size: float in (0,1) fraction or int number of test samples
+    - random_state: int or None for RNG seed
+    - stratify: array-like of labels to stratify by (optional)
+    """
+    X = _np.asarray(X)
+    y = _np.asarray(y)
+    n = X.shape[0]
+    if isinstance(test_size, float):
+        test_n = int(n * test_size)
+    else:
+        test_n = int(test_size)
+
+    if random_state is not None:
+        rng = _np.random.RandomState(random_state)
+    else:
+        rng = _np.random
+
+    if stratify is None:
+        idx = _np.arange(n)
+        rng.shuffle(idx)
+    else:
+        labels = _np.asarray(stratify)
+        uniq = _np.unique(labels)
+        parts = []
+        for u in uniq:
+            ids = _np.where(labels == u)[0]
+            # shuffle in-place using the RNG
+            ids = ids.copy()
+            rng.shuffle(ids)
+            parts.append(ids)
+        idx = _np.concatenate(parts) if parts else _np.arange(n)
+
+    if test_n <= 0:
+        return X, _np.empty((0,) + X.shape[1:]), y, _np.empty((0,), dtype=y.dtype)
+
+    test_idx = idx[:test_n]
+    train_idx = idx[test_n:]
+    return X[train_idx], X[test_idx], y[train_idx], y[test_idx]
 
 # Define a simple feedforward neural network (MLP) 
 class MLPClassifier(nn.Module): 
@@ -23,384 +74,44 @@ class MLPClassifier(nn.Module):
         return self.net(x)
 
 
-# Simple Training
-
-# def train_model(args, dataset_dimension, X, y):
-#     # Select computation device (GPU if available) 
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-#     # Initialize model, optimizer, and loss function 
-#     model = MLPClassifier(d_in=dataset_dimension, n_out=args.m, neurons=args.nodes, n_layers=args.layers).to(device)
-
-#     # Initialize the optimizer
-#     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) 
-#     loss_fn = nn.CrossEntropyLoss()
-
-#     dataset = torch.utils.data.TensorDataset(torch.from_numpy(X.copy()).float(), torch.from_numpy(y.copy()).long())
-#     loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-
-
-#     for epoch in range(args.epochs):
-#         model.train()
-#         total_loss = 0.0
-
-#         # Main training loop 
-#         for xd, yd in loader: 
-#             # Move data to device 
-#             xd, yd = xd.to(device), yd.to(device)
-
-#             # 1. Reset previous gradients 
-#             optimizer.zero_grad()
-
-#             # 2. Forward pass
-#             logits = model(xd)
-
-#             # 3. Compute loss
-#             loss = loss_fn(logits, yd)
-            
-#             # 4. Backward pass (gradients)
-#             loss.backward()
-
-#             # 5. Update parameters
-#             optimizer.step()
-
-#             total_loss += loss.item()
-
-#         print(f"Epoch {epoch+1}/{args.epochs} - Loss: {total_loss/len(loader):.4f}")
-
-#     model = model.to(torch.device("cpu"))
-#     return model
-
-
-
-# Training with splitting training data into train and val data
-
-# def train_model(args, dataset_dimension, X, y):
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     model = MLPClassifier(d_in=dataset_dimension, n_out=args.m,
-#                           neurons=args.nodes, n_layers=args.layers).to(device)
-
-#     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-#     loss_fn = nn.CrossEntropyLoss()
-
-#     # Split data into train / val
-#     X_train, X_val, y_train, y_val = train_test_split(
-#         X, y, test_size=0.1, random_state=42, stratify=y
-#     )
-
-#     train_ds = torch.utils.data.TensorDataset(
-#         torch.from_numpy(X_train.copy()).float(), torch.from_numpy(y_train.copy()).long())
-#     val_ds = torch.utils.data.TensorDataset(
-#         torch.from_numpy(X_val.copy()).float(), torch.from_numpy(y_val.copy()).long())
-
-#     train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-#     val_loader = torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
-
-#     best_val_loss = float("inf")
-#     patience_counter = 0
-#     patience = 3  # stop if val loss doesn't improve for 3 epochs
-
-#     for epoch in range(args.epochs):
-#         model.train()
-#         total_loss = 0.0
-#         for xd, yd in train_loader:
-#             xd, yd = xd.to(device), yd.to(device)
-#             optimizer.zero_grad()
-#             logits = model(xd)
-#             loss = loss_fn(logits, yd)
-#             loss.backward()
-#             optimizer.step()
-#             total_loss += loss.item()
-
-#         avg_train_loss = total_loss / len(train_loader)
-
-#         # ---- validation phase ----
-#         model.eval()
-#         val_loss = 0.0
-#         with torch.no_grad():
-#             for xv, yv in val_loader:
-#                 xv, yv = xv.to(device), yv.to(device)
-#                 logits = model(xv)
-#                 val_loss += loss_fn(logits, yv).item()
-#         avg_val_loss = val_loss / len(val_loader)
-
-#         print(f"Epoch {epoch+1}/{args.epochs} "
-#               f"- Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
-
-#         # early stopping check
-#         if avg_val_loss < best_val_loss:
-#             best_val_loss = avg_val_loss
-#             patience_counter = 0
-#         else:
-#             patience_counter += 1
-#             if patience_counter >= patience:
-#                 print("Early stopping triggered.")
-#                 break
-
-#     model = model.to(torch.device("cpu"))
-#     return model
-
-
-# K folds training (best way till now)
-
-# from sklearn.model_selection import KFold
-# import torch
-# import torch.nn as nn
-# import numpy as np
-
-# def train_model(args, dataset_dimension, X, y):
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     kfold = KFold(n_splits=getattr(args, "kfolds", 4), shuffle=True, random_state=42)
-
-#     fold_results = []
-
-#     for fold, (train_idx, val_idx) in enumerate(kfold.split(X)):
-#         print("-" * 60)
-#         print(f"Fold {fold+1}/{kfold.get_n_splits()}")
-
-#         X_train, X_val = X[train_idx], X[val_idx]
-#         y_train, y_val = y[train_idx], y[val_idx]
-
-#         model = MLPClassifier(d_in=dataset_dimension, n_out=args.m,
-#                               neurons=args.nodes, n_layers=args.layers).to(device)
-#         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-#         loss_fn = nn.CrossEntropyLoss()
-
-#         train_ds = torch.utils.data.TensorDataset(
-#             torch.from_numpy(X_train.copy()).float(), torch.from_numpy(y_train.copy()).long())
-#         val_ds = torch.utils.data.TensorDataset(
-#             torch.from_numpy(X_val.copy()).float(), torch.from_numpy(y_val.copy()).long())
-
-#         train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-#         val_loader = torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
-
-#         best_val_loss = float("inf")
-#         patience_counter = 0
-#         patience = 3
-
-#         for epoch in range(args.epochs):
-#             model.train()
-#             total_loss = 0.0
-#             for xd, yd in train_loader:
-#                 xd, yd = xd.to(device), yd.to(device)
-#                 optimizer.zero_grad()
-#                 logits = model(xd)
-#                 loss = loss_fn(logits, yd)
-#                 loss.backward()
-#                 optimizer.step()
-#                 total_loss += loss.item()
-
-#             avg_train_loss = total_loss / len(train_loader)
-
-#             # Validation loss
-#             model.eval()
-#             val_loss = 0.0
-#             with torch.no_grad():
-#                 for xv, yv in val_loader:
-#                     xv, yv = xv.to(device), yv.to(device)
-#                     val_loss += loss_fn(model(xv), yv).item()
-#             avg_val_loss = val_loss / len(val_loader)
-
-#             print(f"Epoch {epoch+1}/{args.epochs} - "
-#                   f"Train: {avg_train_loss:.4f}, Val: {avg_val_loss:.4f}")
-
-#             if avg_val_loss < best_val_loss:
-#                 best_val_loss = avg_val_loss
-#                 patience_counter = 0
-#                 best_model_state = model.state_dict()
-#             else:
-#                 patience_counter += 1
-#                 if patience_counter >= patience:
-#                     print("Early stopping triggered.")
-#                     break
-
-#         fold_results.append(best_val_loss)
-#         print(f"Fold {fold+1} best val loss: {best_val_loss:.4f}")
-
-#     print("-" * 60)
-#     print(f"Average validation loss across folds: {np.mean(fold_results):.4f} ± {np.std(fold_results):.4f}")
-
-#     # retrain on all data with best hyperparameters (optional)
-#     print("Retraining on full dataset with best fold settings...")
-#     model = MLPClassifier(d_in=dataset_dimension, n_out=args.m,
-#                           neurons=args.nodes, n_layers=args.layers).to(device)
-#     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-#     loss_fn = nn.CrossEntropyLoss()
-
-#     full_ds = torch.utils.data.TensorDataset(
-#         torch.from_numpy(X.copy()).float(), torch.from_numpy(y.copy()).long())
-#     full_loader = torch.utils.data.DataLoader(full_ds, batch_size=args.batch_size, shuffle=True)
-
-#     for epoch in range(args.epochs):
-#         model.train()
-#         total_loss = 0.0
-#         for xd, yd in full_loader:
-#             xd, yd = xd.to(device), yd.to(device)
-#             optimizer.zero_grad()
-#             logits = model(xd)
-#             loss = loss_fn(logits, yd)
-#             loss.backward()
-#             optimizer.step()
-#             total_loss += loss.item()
-#         print(f"[Final Model] Epoch {epoch+1}/{args.epochs} - Loss: {total_loss/len(full_loader):.4f}")
-
-#     model = model.to("cpu")
-#     return model
-
-
-#kfolds with regularization and dropout
-
-# import torch
-# import torch.nn as nn
-# import numpy as np
-# from sklearn.model_selection import KFold
-
-# # Define a simple feedforward neural network (MLP) 
-# class MLPClassifier(nn.Module): 
-#     # Added dropout_rate argument for regularization
-#     def __init__(self, d_in, n_out, neurons, n_layers, dropout_rate=0.25): 
-#         super().__init__() 
-
-#         layers = []
-#         # Input layer
-#         layers.append(nn.Linear(d_in, neurons))
-#         layers.append(nn.ReLU())
-#         layers.append(nn.Dropout(dropout_rate)) # Dropout after activation
-        
-#         # Hidden layers
-#         for _ in range(n_layers - 2):
-#             layers.append(nn.Linear(neurons, neurons))
-#             layers.append(nn.ReLU())
-#             layers.append(nn.Dropout(dropout_rate)) # Dropout after activation
-
-#         # Output layer
-#         layers.append(nn.Linear(neurons, n_out))
-#         self.net = nn.Sequential(*layers)
-
-#     def forward(self, x): 
-#         # Forward pass through the network 
-#         return self.net(x)
-
-
-# def train_model(args, dataset_dimension, X, y):
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-#     # --- Configuration for Regularization (Check args for customization) ---
-#     dropout_rate = getattr(args, "dropout_rate", 0.25)
-#     weight_decay = getattr(args, "weight_decay", 1e-5) # L2 regularization
-
-#     kfold = KFold(n_splits=getattr(args, "kfolds", 4), shuffle=True, random_state=42)
-
-#     fold_results = []
-
-#     for fold, (train_idx, val_idx) in enumerate(kfold.split(X)):
-#         print("-" * 60)
-#         print(f"Fold {fold+1}/{kfold.get_n_splits()}")
-
-#         X_train, X_val = X[train_idx], X[val_idx]
-#         y_train, y_val = y[train_idx], y[val_idx]
-
-#         # Pass dropout_rate to the classifier
-#         model = MLPClassifier(d_in=dataset_dimension, n_out=args.m,
-#                               neurons=args.nodes, n_layers=args.layers, 
-#                               dropout_rate=dropout_rate).to(device)
-                              
-#         # Add weight_decay to the optimizer for L2 regularization
-#         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
-#         loss_fn = nn.CrossEntropyLoss()
-
-#         train_ds = torch.utils.data.TensorDataset(
-#             torch.from_numpy(X_train.copy()).float(), torch.from_numpy(y_train.copy()).long())
-#         val_ds = torch.utils.data.TensorDataset(
-#             torch.from_numpy(X_val.copy()).float(), torch.from_numpy(y_val.copy()).long())
-
-#         train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-#         val_loader = torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
-
-#         best_val_loss = float("inf")
-#         patience_counter = 0
-#         patience = 3
-#         best_model_state = None
-
-#         for epoch in range(args.epochs):
-#             model.train()
-#             total_loss = 0.0
-#             for xd, yd in train_loader:
-#                 xd, yd = xd.to(device), yd.to(device)
-#                 optimizer.zero_grad()
-#                 logits = model(xd)
-#                 loss = loss_fn(logits, yd)
-#                 loss.backward()
-#                 optimizer.step()
-#                 total_loss += loss.item()
-
-#             avg_train_loss = total_loss / len(train_loader)
-
-#             # Validation loss
-#             model.eval()
-#             val_loss = 0.0
-#             with torch.no_grad():
-#                 for xv, yv in val_loader:
-#                     xv, yv = xv.to(device), yv.to(device)
-#                     val_loss += loss_fn(model(xv), yv).item()
-#             avg_val_loss = val_loss / len(val_loader)
-
-#             print(f"Epoch {epoch+1}/{args.epochs} - "
-#                   f"Train: {avg_train_loss:.4f}, Val: {avg_val_loss:.4f}")
-
-#             if avg_val_loss < best_val_loss:
-#                 best_val_loss = avg_val_loss
-#                 patience_counter = 0
-#                 # Save the state_dict for the best model in this fold
-#                 best_model_state = model.state_dict() 
-#             else:
-#                 patience_counter += 1
-#                 if patience_counter >= patience:
-#                     print("Early stopping triggered.")
-#                     break
-
-#         fold_results.append(best_val_loss)
-#         print(f"Fold {fold+1} best val loss: {best_val_loss:.4f}")
-
-#     print("-" * 60)
-#     print(f"Average validation loss across folds: {np.mean(fold_results):.4f} ± {np.std(fold_results):.4f}")
-
-#     # Retrain on full dataset
-#     print("Retraining on full dataset with final configuration...")
-#     model = MLPClassifier(d_in=dataset_dimension, n_out=args.m,
-#                           neurons=args.nodes, n_layers=args.layers, 
-#                           dropout_rate=dropout_rate).to(device)
-#     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
-#     loss_fn = nn.CrossEntropyLoss()
-
-#     full_ds = torch.utils.data.TensorDataset(
-#         torch.from_numpy(X.copy()).float(), torch.from_numpy(y.copy()).long())
-#     full_loader = torch.utils.data.DataLoader(full_ds, batch_size=args.batch_size, shuffle=True)
-
-#     for epoch in range(args.epochs):
-#         model.train()
-#         total_loss = 0.0
-#         for xd, yd in full_loader:
-#             xd, yd = xd.to(device), yd.to(device)
-#             optimizer.zero_grad()
-#             logits = model(xd)
-#             loss = loss_fn(logits, yd)
-#             loss.backward()
-#             optimizer.step()
-#             total_loss += loss.item()
-        
-#         # Simple logging for full training, no validation
-#         print(f"[Final Model] Epoch {epoch+1}/{args.epochs} - Loss: {total_loss/len(full_loader):.4f}")
-
-#     model = model.to("cpu")
-#     return model
-
 
 # kfolds, regularization, dropout, cnn and pooling
 import torch
 import torch.nn as nn
 import numpy as np
-from sklearn.model_selection import KFold
+
+# Local KFold replacement to avoid depending on sklearn (prevents importing
+# sklearn/pandas which can trigger binary incompatibilities in some systems).
+class KFold:
+    def __init__(self, n_splits=4, shuffle=False, random_state=None):
+        self.n_splits = n_splits
+        self.shuffle = shuffle
+        self.random_state = random_state
+
+    def get_n_splits(self):
+        return self.n_splits
+
+    def split(self, X):
+        n = len(X)
+        idx = np.arange(n)
+        rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
+        if self.shuffle:
+            rng.shuffle(idx)
+        fold_sizes = (n // self.n_splits) * np.ones(self.n_splits, dtype=int)
+        remainder = n % self.n_splits
+        for i in range(remainder):
+            fold_sizes[i] += 1
+        current = 0
+        for fold_size in fold_sizes:
+            start = current
+            stop = current + fold_size
+            test_idx = idx[start:stop]
+            if start > 0 or stop < n:
+                train_idx = np.concatenate([idx[:start], idx[stop:]])
+            else:
+                train_idx = np.array([], dtype=int)
+            yield train_idx, test_idx
+            current = stop
 
 # --- CNN Classifier for Image Data ---
 class CNNClassifier(nn.Module):
