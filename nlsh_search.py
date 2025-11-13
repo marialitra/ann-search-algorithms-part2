@@ -8,7 +8,9 @@ import numpy as np
 import torch
 # We renamed the classifier, but kept the old name for backward compatibility during import
 # while updating the internal usage to the new CNN architecture.
-from neural_net import CNNClassifier as Classifier 
+from neural_net import CNNClassifier, MLPClassifier
+
+Classifier = None
 
 from typing import Dict, List, Tuple
 
@@ -257,10 +259,55 @@ def main():
     
     model = None
     if os.path.exists(model_path):
-        # Initialize the CNN model using image dimensions
-        model = Classifier(img_rows=img_rows, img_cols=img_cols, n_out=m)
-        model.load_state_dict(torch.load(model_path, map_location="cpu"))
-        model.eval()
+        # Load the checkpoint first and decide which classifier to instantiate
+        sd = torch.load(model_path, map_location="cpu")
+        # Handle common checkpoint wrappers where the state_dict is nested
+        if isinstance(sd, dict):
+            # common keys used by training scripts
+            for k in ("state_dict", "model_state_dict", "model", "net"): 
+                if k in sd and isinstance(sd[k], dict):
+                    sd = sd[k]
+                    break
+
+        # sanitize image dims (avoid zero sizes)
+        if img_rows < 1:
+            img_rows = 1
+        if img_cols < 1:
+            img_cols = max(1, d_in)
+
+        # Heuristic: if the saved state_dict contains 'conv1.0.weight' it's a CNN;
+        # if it contains keys starting with 'net.' it's the MLP implementation.
+        sd_keys = list(sd.keys()) if isinstance(sd, dict) else []
+
+        if any(k.startswith('conv1') or k.startswith('conv1.0') for k in sd_keys):
+            # CNN checkpoint
+            model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=m)
+            model.load_state_dict(sd)
+            model.eval()
+        elif any(k.startswith('net.') for k in sd_keys):
+            # MLP checkpoint: infer hidden size and number of linear layers
+            # find keys of the form 'net.<i>.weight'
+            linear_keys = [k for k in sd_keys if k.startswith('net.') and k.endswith('.weight')]
+            if not linear_keys:
+                raise RuntimeError("Saved state_dict looks like an MLP but no linear weights found.")
+            # pick the first linear weight to infer hidden size and input dim
+            first_w = sd[sorted(linear_keys)[0]]
+            hidden_size = int(first_w.shape[0])
+            # number of linear layers == number of linear_keys
+            n_linears = len(linear_keys)
+            # construct an MLP with that many linear layers
+            model = MLPClassifier(d_in=d_in, n_out=m, hidden_size=hidden_size, n_layers=n_linears, dropout=0.0)
+            model.load_state_dict(sd)
+            model.eval()
+        else:
+            # fallback: try to initialize CNN but load with strict=False to allow partial matches
+            try:
+                model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=m)
+                model.load_state_dict(sd, strict=False)
+                model.eval()
+                print("Warning: loaded model.pth with fallback CNN (strict=False).")
+            except Exception:
+                raise RuntimeError("Could not infer model architecture from saved state_dict. Please ensure the saved model matches the search-time model.")
     else:
         print("Warning: model.pth not found. Skipping model loading/hashing.")
 

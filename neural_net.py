@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from torch.cuda.amp import autocast, GradScaler as scaler
+from torch.cuda.amp import autocast, GradScaler
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 
@@ -216,8 +216,13 @@ def sift_train(args, img_rows, img_cols, X, y):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Normalize SIFT features (important!)
-    X = X / np.linalg.norm(X, axis=1, keepdims=True)
+    # SIFT X may be shaped (n,1,1,dim) coming from the loader. Flatten to (n, dim).
+    X = X.reshape(X.shape[0], -1)
+
+    # Normalize SIFT features (important!). Guard against zero-norm vectors.
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    X = X / norms
 
     # Split train/val once
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.1, random_state=42)
@@ -239,17 +244,26 @@ def sift_train(args, img_rows, img_cols, X, y):
     loss_fn = nn.CrossEntropyLoss()
 
     # DataLoaders
+    # Create TensorDatasets from flattened arrays. Avoid unnecessary copies when possible.
+    train_tensor_x = torch.from_numpy(X_train.copy()).float()
+    val_tensor_x = torch.from_numpy(X_val.copy()).float()
     train_ds = torch.utils.data.TensorDataset(
-        torch.from_numpy(X_train.copy()).float(),
+        train_tensor_x,
         torch.from_numpy(y_train.copy()).long()
     )
     val_ds = torch.utils.data.TensorDataset(
-        torch.from_numpy(X_val.copy()).float(),
+        val_tensor_x,
         torch.from_numpy(y_val.copy()).long()
     )
 
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size, num_workers=4, pin_memory=True)
+    # Tune DataLoader for GPU if available
+    use_cuda = (device.type == "cuda")
+    dl_kwargs = dict(batch_size=args.batch_size, num_workers=4, pin_memory=use_cuda)
+    train_loader = torch.utils.data.DataLoader(train_ds, shuffle=True, **dl_kwargs)
+    val_loader = torch.utils.data.DataLoader(val_ds, shuffle=False, **dl_kwargs)
+
+    # AMP scaler only needed on CUDA
+    scaler = GradScaler() if use_cuda else None
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -263,18 +277,29 @@ def sift_train(args, img_rows, img_cols, X, y):
         total_train_loss = 0.0
 
         for xb, yb in train_loader:
-            xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
+            xb, yb = xb.to(device, non_blocking=use_cuda), yb.to(device, non_blocking=use_cuda)
             optimizer.zero_grad()
 
-            # ✅ forward pass under autocast (mixed precision)
-            with autocast(enabled=(device.type == "cuda")):
+            if use_cuda:
+                # enable AMP on CUDA devices
+                with autocast(enabled=True):
+                    logits = model(xb)
+                    loss = loss_fn(logits, yb)
+                # backward with scaler if available
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    # fallback if scaler not available
+                    loss.backward()
+                    optimizer.step()
+            else:
+                # CPU path: no AMP
                 logits = model(xb)
                 loss = loss_fn(logits, yb)
-
-            # ✅ backward pass via GradScaler
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+                loss.backward()
+                optimizer.step()
 
             total_train_loss += loss.item()
 
@@ -285,8 +310,11 @@ def sift_train(args, img_rows, img_cols, X, y):
         total_val_loss = 0.0
         with torch.no_grad():
             for xb, yb in val_loader:
-                xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
-                with autocast(enabled=(device.type == "cuda")):
+                xb, yb = xb.to(device, non_blocking=use_cuda), yb.to(device, non_blocking=use_cuda)
+                if use_cuda:
+                    with autocast(enabled=True):
+                        val_loss = loss_fn(model(xb), yb)
+                else:
                     val_loss = loss_fn(model(xb), yb)
                 total_val_loss += val_loss.item()
         avg_val_loss = total_val_loss / len(val_loader)

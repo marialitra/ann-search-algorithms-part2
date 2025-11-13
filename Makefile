@@ -10,12 +10,12 @@ INPUT_FILE := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
 DATASET_FILE := ./Data/SIFT/sift_base.fvecs
 OUTPUT_FILE:= nlsh_index
 DATASET_TYPE := sift
-NUM_BLOCKS := 10
-NUM_LAYERS := 5
-NUM_NEURONS := 512
+NUM_BLOCKS := 200
+NUM_LAYERS := 3
+NUM_NEURONS := 256
 LEARNING_RATE := 0.001
 EPOCHS := 20
-BATCH_SIZE := 32
+BATCH_SIZE := 1024
 
 
 # --- Targets ---
@@ -60,4 +60,4 @@ search:
   -i nlsh_index \
   -o output.txt \
   -type sift \
-  -N 4 -T 5 -range FALSE
+  -N 4 -T 20 -range FALSE
