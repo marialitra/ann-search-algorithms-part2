@@ -2,21 +2,31 @@
 
 # --- Variables ---
 PYTHON := python3
-SCRIPT := builder.py
+SCRIPT := ./src/nlsh_build.py
 
 # Example arguments for running the script.
 # NOTE: You need to replace these paths and values with actual files and desired settings.
-INPUT_FILE := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
-DATASET_FILE := ./Data/SIFT/sift_base.fvecs
+INPUT_FILE_SIFT := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
+DATASET_FILE_SIFT := ./Data/SIFT/sift_base.fvecs
+OUTPUT_FILE_SIFT:= nlsh_index
+DATASET_TYPE_SIFT := sift
+NUM_BLOCKS_SIFT := 200
+NUM_LAYERS_SIFT := 3
+NUM_NEURONS_SIFT := 256
+LEARNING_RATE_SIFT := 0.001
+EPOCHS_SIFT := 20
+BATCH_SIZE_SIFT := 1024
+
+INPUT_FILE := ./knngraphs/mnistfullivfflat5testset.txt
+DATASET_FILE := ./Data/MNIST/train-images.idx3-ubyte
 OUTPUT_FILE:= nlsh_index
-DATASET_TYPE := sift
-NUM_BLOCKS := 200
-NUM_LAYERS := 3
-NUM_NEURONS := 256
+DATASET_TYPE := MNIST
+NUM_BLOCKS := 2000
+NUM_LAYERS := 5
+NUM_NEURONS := 512
 LEARNING_RATE := 0.001
 EPOCHS := 20
-BATCH_SIZE := 1024
-
+BATCH_SIZE := 4098
 
 # --- Targets ---
 
@@ -25,7 +35,23 @@ BATCH_SIZE := 1024
 all: run
 
 ## run: Executes the script with example arguments.
-run:
+sift:
+	@echo "--- Running the script: $(SCRIPT) ---"
+	$(PYTHON) $(SCRIPT) \
+		$(INPUT_FILE_SIFT) \
+		-d $(DATASET_FILE_SIFT) \
+		-i $(OUTPUT_FILE_SIFT) \
+		--type $(DATASET_TYPE_SIFT) \
+		-m $(NUM_BLOCKS_SIFT) \
+		--layers $(NUM_LAYERS_SIFT) \
+		--nodes $(NUM_NEURONS_SIFT) \
+		--lr $(LEARNING_RATE_SIFT) \
+		--epochs $(EPOCHS_SIFT) \
+		--batch_size $(BATCH_SIZE_SIFT)
+	@echo "-----------------------------------"
+
+
+mnist:
 	@echo "--- Running the script: $(SCRIPT) ---"
 	$(PYTHON) $(SCRIPT) \
 		$(INPUT_FILE) \
@@ -40,7 +66,6 @@ run:
 		--batch_size $(BATCH_SIZE)
 	@echo "-----------------------------------"
 
-
 ## clean: Placeholder for cleaning up generated files.
 clean:
 	@echo "Cleaning up generated files (if any)..."
@@ -53,11 +78,19 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 
-search:
-	python3 nlsh_search.py \
+siftSearch:
+	python3 ./src/nlsh_search.py \
   -d ./Data/SIFT/sift_base.fvecs \
   -q ./Data/SIFT/sift_query.fvecs \
   -i nlsh_index \
   -o output.txt \
   -type sift \
   -N 4 -T 20 -range FALSE
+
+mnistSearch:
+	python3 ./src/nlsh_search.py \
+  -d ./Data/MNIST/train-images.idx3-ubyte \
+  -q ./Data/MNIST/t10k-images.idx3-ubyte \
+  -i nlsh_index \
+  -o output.txt \
+  -N 4 -T 200 -range FALSE

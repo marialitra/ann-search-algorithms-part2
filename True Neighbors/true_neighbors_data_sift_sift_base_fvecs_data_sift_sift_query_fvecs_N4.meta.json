@@ -1,0 +1,8 @@
+{
+  "dataset_name": "./Data/SIFT/sift_base.fvecs",
+  "query_name": "./Data/SIFT/sift_query.fvecs",
+  "N": 4,
+  "dataset_size": 1000000,
+  "query_size": 10000,
+  "dim": 128
+}
