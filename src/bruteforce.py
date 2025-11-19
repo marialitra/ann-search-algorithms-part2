@@ -1,21 +1,7 @@
 import libraries
-from libraries import np, List, Tuple
+from libraries import np, List, Tuple, _slug
 
 # --- Brute-Force and Caching Logic ---
-
-def _slug(s: str) -> str:
-    """
-        Make filesystem-safe short name from arbitrary string.
-    """
-
-    import re
-    if s is None:
-        return "unknown"
-    s = str(s)
-    s = s.strip().lower()
-    s = re.sub(r'[^a-z0-9]+', '_', s)
-    s = s.strip('_')
-    return s or "unknown"
 
 def _make_cache_paths(base_dir: str, datasetName: str, queryName: str, N: int) -> Tuple[str, str] :
     """

@@ -6,8 +6,12 @@ SCRIPT := ./src/nlsh_build.py
 
 # Example arguments for running the script.
 # NOTE: You need to replace these paths and values with actual files and desired settings.
-INPUT_FILE_SIFT := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
+
+# INPUT_FILE_SIFT := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
+# INPUT_FILE_SIFT := ./src/sift5knn.txt
+
 DATASET_FILE_SIFT := ./Data/SIFT/sift_base.fvecs
+# DATASET_FILE_SIFT := ./Data/SIFT/sift_base_100k.fvecs
 OUTPUT_FILE_SIFT:= nlsh_index
 DATASET_TYPE_SIFT := sift
 NUM_BLOCKS_SIFT := 200
@@ -16,8 +20,9 @@ NUM_NEURONS_SIFT := 256
 LEARNING_RATE_SIFT := 0.001
 EPOCHS_SIFT := 20
 BATCH_SIZE_SIFT := 1024
+KNN_NEIGHBORS := 5
 
-INPUT_FILE := ./knngraphs/mnistfullivfflat5testset.txt
+# INPUT_FILE := ./knngraphs/mnistfullivfflat5testset.txt
 DATASET_FILE := ./Data/MNIST/train-images.idx3-ubyte
 OUTPUT_FILE:= nlsh_index
 DATASET_TYPE := MNIST
@@ -38,10 +43,10 @@ all: run
 sift:
 	@echo "--- Running the script: $(SCRIPT) ---"
 	$(PYTHON) $(SCRIPT) \
-		$(INPUT_FILE_SIFT) \
 		-d $(DATASET_FILE_SIFT) \
 		-i $(OUTPUT_FILE_SIFT) \
 		--type $(DATASET_TYPE_SIFT) \
+		--knn $(KNN_NEIGHBORS) \
 		-m $(NUM_BLOCKS_SIFT) \
 		--layers $(NUM_LAYERS_SIFT) \
 		--nodes $(NUM_NEURONS_SIFT) \
@@ -54,10 +59,10 @@ sift:
 mnist:
 	@echo "--- Running the script: $(SCRIPT) ---"
 	$(PYTHON) $(SCRIPT) \
-		$(INPUT_FILE) \
 		-d $(DATASET_FILE) \
 		-i $(OUTPUT_FILE) \
 		--type $(DATASET_TYPE) \
+		--knn $(KNN_NEIGHBORS) \
 		-m $(NUM_BLOCKS) \
 		--layers $(NUM_LAYERS) \
 		--nodes $(NUM_NEURONS) \
