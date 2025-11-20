@@ -1,14 +1,12 @@
 import libraries
 from libraries import np, Tuple, Dict, List
 
-# Function to parse the neighbors file
 def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], int]:
     """
         Parse the neighbor file.
-
-        Returns:
-            neighbors: dict query -> list of neighbor ids (ints) in order
+        Returns: neighbors: dict query -> list of neighbor ids (ints) in order
     """
+
     neighbors: Dict[int, List[int]] = {}
 
     # regex helpers
@@ -36,11 +34,9 @@ def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], int]:
 
     return neighbors, len(neighbors)
 
-# Helper function to load the MNIST-based files
 def load_idx_images(filepath: str) -> Tuple[np.ndarray, int, int, int]:
     """
         Reads and extracts image vectors from a file in the IDX format (like MNIST).
-        
         Returns:
             A tuple containing:
             - data_vectors: A NumPy array of shape (num_images, 1, rows, cols), 
@@ -83,7 +79,7 @@ def load_idx_images(filepath: str) -> Tuple[np.ndarray, int, int, int]:
     print("Successfully extracted vectors.")
     return data_vectors, num_images, num_rows, num_cols
 
-# Helper functions to load the SIFT-based files
+
 def read_fvecs(path: str) -> np.ndarray:
     """
         Read .fvecs file (each vector stored as: int32 dim, float32 dim values).
@@ -96,8 +92,7 @@ def read_fvecs(path: str) -> np.ndarray:
             if not hdr:
                 break
             d = libraries.struct.unpack('i', hdr)[0]
-            # read d float32 values
-            bytes_needed = 4 * d
+            bytes_needed = 4 * d # read d float32 values
             buf = fh.read(bytes_needed)
             if len(buf) != bytes_needed:
                 raise EOFError(f"Unexpected EOF while reading {path}")
@@ -123,7 +118,6 @@ def load_sift_vectors(filepath: str, dtype=np.float32) -> tuple[np.memmap, int, 
     if lower.endswith('.fvecs'):
         mat = read_fvecs(filepath).astype(np.float32)
     else:
-        # try numpy
         try:
             mat = np.load(filepath)
             if mat.ndim == 1:

@@ -1,6 +1,5 @@
 import libraries
 from libraries import Tuple, Dict, List, np, nn, counter, load_sift_vectors, load_idx_images, mnist_train, sift_train, parse_neighbor_file, build_csr_from_neighbors, save_output, _slug
-
 from runSearchExe import build_executable, run_ivfflat
 
 def main():
@@ -26,9 +25,8 @@ def main():
 
     dataset_type = args.type
     print(f"The specified dataset type is: {dataset_type}")
-    
-    
-    # Load data: MNIST-like IDX images or SIFT vectors
+
+    # Load data: MNIST-IDX images or SIFT vectors
     if dataset_type and dataset_type.lower().startswith('sift'):
         data_vectors, num_images, img_rows, img_cols = load_sift_vectors(args.dataset)
         dataset_type = "sift"
@@ -46,6 +44,7 @@ def main():
         print("Not acceptable dataset type")
         exit()
 
+    # ---- Build or load the kNN graph using IVFFLAT ----
     output_dir = "knngraphs"
     libraries.os.makedirs(output_dir, exist_ok=True)
     
@@ -76,13 +75,14 @@ def main():
         else:
             raise SystemExit("Build failed. Cannot proceed to run IVFFLAT.")
 
+    # ---- Parse the kNN graph and build CSR adjacency ----
     neighbors, datasetsize = parse_neighbor_file(knn_graph)
     print(f"Parsed {datasetsize} queries. Building adjacency...")
 
     xadj, adjncy, adjwgt, vwgt = build_csr_from_neighbors(neighbors, datasetsize)
 
 
-    # Call kahip partitioner
+    # ---- Call kahip partitioner ----
     print("Start of KaHIP")
     # calculcate time it takes
     clock_start = libraries.time.time()
@@ -94,6 +94,7 @@ def main():
     X = data_vectors    # shape (n, 1, rows, cols)
     y = np.array(blocks)  # labels from KaHIP
 
+    # ---- Train the model based on dataset type ----
     if dataset_type and dataset_type.lower().startswith('sift'):
         model = sift_train(args, img_rows, img_cols, X, y)
     else:

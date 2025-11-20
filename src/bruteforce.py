@@ -2,11 +2,13 @@ import libraries
 from libraries import np, List, Tuple, _slug, time
 
 # --- Brute-Force and Caching Logic ---
-
 def _make_cache_paths(base_dir: str, datasetName: str, queryName: str, N: int) -> Tuple[str, str] :
     """
         Returns (array_path, meta_path) for the cache files given dataset/query names and N.
         base_dir can be a folder; if empty, uses current folder.
+        the files are placed in a subfolder "True Neighbors" with formatted names as:
+        true_neighbors_{datasetName}_{queryName}_N{N}.npy
+        true_neighbors_{datasetName}_{queryName}_N{N}.meta.json
     """
 
     base_dir = base_dir or "."
@@ -37,9 +39,7 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
     print("-" * 50)
     print(f"Brute-Force: Finding True Neighbors (N={N}) and Caching to '{arr_path}'...")
 
-    # Memory-efficient block-wise computation of top-N neighbors.
-    # Process queries in small batches and dataset in chunks so we never allocate
-    # the full (nq x n) distance matrix which can be huge.
+
     nq, dimq = Q_flat.shape
     n, dimx = X_flat.shape
     assert dimq == dimx, "Query and dataset dimensions must match"
@@ -48,7 +48,7 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
     X_arr = X_flat.astype(np.float32, copy=False)
     Q_arr = Q_flat.astype(np.float32, copy=False)
 
-    # Parameters: tune chunk sizes if needed. Defaults chlibraries.osen to balance memory and speed.
+    # process in chunks to save memory
     X_CHUNK = 10000  # number of dataset vectors per chunk
     Q_BATCH = 128    # number of queries per batch
 
@@ -58,21 +58,19 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
 
     start_time = time.perf_counter()
 
-    # Precompute squared norms of dataset in chunks on the fly
+    #compute squared norms of dataset in chunks on the fly
     for qi in range(0, nq, Q_BATCH):
         q_slice = slice(qi, min(qi + Q_BATCH, nq))
         Qb = Q_arr[q_slice]  # shape (qb, dim)
-        Qb_norm_sq = np.sum(Qb * Qb, axis=1)[:, None]  # (qb, 1)
+        Qb_norm_sq = np.sum(Qb * Qb, axis=1)[:, None] 
 
         # For each dataset chunk, compute distances to this Q batch and update top-N
         for xi in range(0, n, X_CHUNK):
             x_slice = slice(xi, min(xi + X_CHUNK, n))
             Xc = X_arr[x_slice]  # (xc, dim)
-            Xc_norm_sq = np.sum(Xc * Xc, axis=1)[None, :]  # (1, xc)
+            Xc_norm_sq = np.sum(Xc * Xc, axis=1)[None, :] 
 
-            # compute squared distances: (qb, xc)
-            # dist_sq = Qb_norm_sq - 2 * Qb @ Xc.T + Xc_norm_sq
-            # Use matmul; result is float32
+            # Compute squared Euclidean distances: ||q - x||^2 = ||q||^2 - 2q.x + ||x||^2
             prod = Qb.astype(np.float32) @ Xc.T
             dist_sq = Qb_norm_sq - 2.0 * prod + Xc_norm_sq
 
@@ -82,7 +80,8 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
             if dist_sq.size == 0:
                 continue
             kth = min(N, dist_sq.shape[1] - 1)
-            local_idx = np.argpartition(dist_sq, kth, axis=1)[:, :N]  # (qb, <=N)
+            local_idx = np.argpartition(dist_sq, kth, axis=1)[:, :N]  
+
             # Gather distances and convert local indices to global indices
             rows = np.arange(dist_sq.shape[0])[:, None]
             local_dists = dist_sq[rows, local_idx]
@@ -130,14 +129,15 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
     print("-" * 50)
     return true_neighbors_indices, elapsed_time
 
+
 def load_or_compute_true_neighbors(X: np.ndarray, Q: np.ndarray, datasetName: str, queryName: str,
                                    N: int, true_neighbors_file: str = None, cache_dir: str = ".") -> np.ndarray:
     """
-        Load cached true neighbors if compatible; otherwise compute and save.
+        Loads cached true neighbors if available, else computes and saves anew.
         - If true_neighbors_file is provided and is a filepath it will be used.
         - If true_neighbors_file is None or points to a directory, the cache filename is auto-generated in cache_dir.
     """
-    # Flatten inputs (safety)
+    # Flatten inputs 
     X_flat = X.reshape(X.shape[0], -1)
     Q_flat = Q.reshape(Q.shape[0], -1)
 
@@ -152,7 +152,7 @@ def load_or_compute_true_neighbors(X: np.ndarray, Q: np.ndarray, datasetName: st
     if libraries.os.path.exists(arr_path) and libraries.os.path.exists(meta_path):
         try:
             meta = libraries.json.load(open(meta_path))
-            # check N, sizes, names (you can be strict or lenient)
+
             cached_N = int(meta.get("N", -1))
             cached_qsize = int(meta.get("query_size", -1))
             cached_dsize = int(meta.get("dataset_size", -1))
@@ -186,7 +186,7 @@ def load_or_compute_true_neighbors(X: np.ndarray, Q: np.ndarray, datasetName: st
                 return find_and_save_true_neighbors(X_flat, Q_flat, N, arr_path, datasetName, queryName)
 
             t_true = float(meta.get("time_seconds", 0.0))
-            print(f"Loaded cached true neighbors from {arr_path} (original compute time t={t_true:.6f}s)")
+            # print(f"Loaded cached true neighbors from {arr_path} (original compute time t={t_true:.6f}s)")
             return true_neighbors, t_true
 
         except Exception as e:
@@ -211,21 +211,16 @@ def calculate_recall(true_neighbors_array: np.ndarray, all_lsh_neighbors: List[n
         raise ValueError("Mismatch between true neighbor array size and LSH result size.")
 
     for qi in range(total_queries):
-        # The true_neighbors_array is already a set of indices
         true_topN_indices = set(true_neighbors_array[qi]) 
-        # LSH neighbors are the indices retrieved by the search
         lsh_neighbors = set(all_lsh_neighbors[qi])
         
-        # Intersection: True Plibraries.ositives found by LSH
+        # Intersection: True Positives found by LSH 
         hits = len(true_topN_indices.intersection(lsh_neighbors))
         
-        # Recall@N: (True Plibraries.ositives) / N
+        # Recall@N: (True Positives) / N
         recall_q = hits / N
         total_recall += recall_q
     
     average_recall = total_recall / total_queries
-    
-    print(f"Evaluation Completed. Average Recall@{N}: {average_recall:.4f}")
-    print("-" * 50)
-    
+
     return average_recall

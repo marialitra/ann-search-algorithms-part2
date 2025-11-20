@@ -1,14 +1,15 @@
 import os
-from typing import Sequence, Optional
+import time
 import numpy as np
 import torch
+import torch.nn as nn
+from typing import Sequence, Optional
 
 
 class MemmapSIFTDataset(torch.utils.data.Dataset):
-    """Dataset that reads rows from a NumPy memmap or ndarray on demand.
-
-    Returns (tensor_features, int_label) where tensor_features is float32
-    and label is a torch.long.
+    """ Dataset that reads rows from a NumPy memmap or ndarray on demand.
+        Returns (tensor_features, int_label) where tensor_features is float32
+        and label is a torch.long.
     """
     def __init__(self, data: np.ndarray, labels: Sequence[int], indices: Optional[Sequence[int]] = None):
         # data: memmap or ndarray shaped (n, dim) or (n,1,1,dim)
@@ -35,7 +36,7 @@ class MemmapSIFTDataset(torch.utils.data.Dataset):
         if norm == 0:
             norm = 1.0
         a = a / norm
-        # convert to torch tensor (no explicit copy if possible)
+        # convert to torch tensor and get label
         x = torch.from_numpy(a)
         y = int(self.labels[i])
         return x, torch.tensor(y, dtype=torch.long)
@@ -43,9 +44,8 @@ class MemmapSIFTDataset(torch.utils.data.Dataset):
 
 def make_sift_dataloaders(data: np.ndarray, labels: np.ndarray, train_idx, val_idx, batch_size: int = 256, num_workers: Optional[int] = None, pin_memory: bool = False, persistent_workers: bool = True):
     """Create DataLoaders for SIFT training using memmap-backed dataset.
-
-    - data: np.ndarray or memmap shaped (n, ...) ; labels: 1D array-like
-    - train_idx, val_idx: index arrays (numpy)
+        - data: np.ndarray or memmap shaped (n, ...) ; labels: 1D array-like
+        - train_idx, val_idx: index arrays (numpy)
     """
     if num_workers is None:
         try:

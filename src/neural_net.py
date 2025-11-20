@@ -2,27 +2,7 @@ import libraries
 from libraries import nn, np, train_test_split, GradScaler, autocast
 from dataset_utils import make_sift_dataloaders
 
-# Define a simple feedforward neural network (MLP) 
-# class MLPClassifier(nn.Module): 
-#     def __init__(self, d_in, n_out, neurons, n_layers): 
-#         super().__init__() 
-
-#         layers = []
-#         layers.append(nn.Linear(d_in, neurons))
-#         layers.append(nn.ReLU())
-#         for _ in range(n_layers - 2):
-#             layers.append(nn.Linear(neurons, neurons))
-#             layers.append(nn.ReLU())
-
-#         layers.append(nn.Linear(neurons, n_out))
-#         self.net = nn.Sequential(*layers)
-
-#     def forward(self, x): 
-#         # Forward pass through the network 
-#         return self.net(x)
-
-
-# Define MLP
+# Define MLP Classifier for SIFT data
 class MLPClassifier(nn.Module):
     def __init__(self, d_in, n_out, hidden_size, n_layers, dropout):
         super().__init__()
@@ -44,10 +24,7 @@ class MLPClassifier(nn.Module):
 class CNNClassifier(nn.Module):
     def __init__(self, img_rows, img_cols, n_out, dropout_rate=0.25): 
         super().__init__()
-        
-        # Determine the size after the convolution and pooling layers
-        # Simple two-layer CNN architecture suitable for MNIST (28x28)
-        
+
         # Layer 1: Conv -> ReLU -> Pool -> Dropout
         self.conv1 = nn.Sequential(
             # Input: 1 channel (grayscale), Output: 32 feature maps
@@ -73,8 +50,8 @@ class CNNClassifier(nn.Module):
         final_w = img_cols // 4
         fc_input_size = final_h * final_w * 64 
         
-        print(f"CNN Feature Map size before Flatten: 64x{final_h}x{final_w}")
-        print(f"Final Linear layer input size: {fc_input_size}")
+        # print(f"CNN Feature Map size before Flatten: 64x{final_h}x{final_w}")
+        # print(f"Final Linear layer input size: {fc_input_size}")
         
         # Final fully connected layer for classification
         self.classifier = nn.Sequential(
@@ -88,13 +65,15 @@ class CNNClassifier(nn.Module):
         return self.classifier(x)
 
 def mnist_train(args, img_rows, img_cols, X, y):
+    """
+        Lightweight and GPU-optimized training for MNIST-like datasets.
+    """
     device = libraries.torch.device("cuda" if libraries.torch.cuda.is_available() else "cpu")
     
     # --- Configuration for Regularization ---
     dropout_rate = getattr(args, "dropout_rate", 0.25)
     weight_decay = getattr(args, "weight_decay", 1e-5) # L2 regularization
 
-    # Single train/validation split (KFold removed - does not improve recall)
     # Normalize and split without copying large arrays where possible
     X_flat = X.reshape(X.shape[0], -1)
     indices = np.arange(X_flat.shape[0], dtype=np.int64)
@@ -167,18 +146,13 @@ def sift_train(args, img_rows, img_cols, X, y):
 
     """
         Lightweight and GPU-optimized training for large SIFT1M dataset.
-        Uses a single train/val split instead of K-fold to reduce cost.
     """
 
     device = libraries.torch.device("cuda" if libraries.torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
 
-    # SIFT X may be shaped (n,1,1,dim) coming from the loader. Flatten to (n, dim)
-    # We avoid normalizing the entire array in memory (which would copy) and
-    # instead normalize per-sample inside the Dataset (see dataset_utils).
     X = X.reshape(X.shape[0], -1)
 
-    # Split train/val once using indices to avoid copying large arrays
+    # Split train/val once 
     indices = np.arange(X.shape[0], dtype=np.int64)
     train_idx, val_idx = train_test_split(indices, test_size=0.1, random_state=42)
 

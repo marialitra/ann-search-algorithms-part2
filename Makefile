@@ -103,11 +103,11 @@ mnistSearch:
 	OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 	python3 ./src/nlsh_search.py \
   -d ./Data/MNIST/train-images.idx3-ubyte \
-  -q ./Data/MNIST/t10k-images.idx3-ubyte \
+  -q ./Data/MNIST/t10k-images-100-sample.idx3-ubyte \
   -i nlsh_index_mnist \
   -o output.txt \
   -type MNIST \
-  -N 5 -R 300 -T 100 -range TRUE
+  -N 5 -R 300 -T 500 -range TRUE
 
 
 # ==============================================================

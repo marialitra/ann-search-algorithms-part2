@@ -1,7 +1,7 @@
 import libraries
 from libraries import np, CNNClassifier, MLPClassifier, Tuple, List, load_idx_images, load_sift_vectors
-
 from bruteforce import load_or_compute_true_neighbors, calculate_recall
+import bruteforce_naive as bf_naive
 
 Classifier = None
 
@@ -17,16 +17,14 @@ def main():
     p.add_argument("-T", type=int, default=5, help="Number of bins to probe (multi-probe)")
     p.add_argument("-range", type=str, default="true", help="Range search flag")
     args = p.parse_args()
-    print(libraries.time.strftime("%Y-%m-%d %H:%M:%S", libraries.time.localtime()), "Starting Neural LSH search...")
-
+    
     is_mnist = args.type and args.type.lower().startswith("mnist")
     is_sift = args.type and args.type.lower().startswith("sift")
 
     # --- Setup default R ---
     if args.R < 0:
         # Meaning that no given value has been given, or a wrong one detected,
-        # We are going to use the defaut values for each dataset type
-
+        # We are going to use the default values for each dataset type
         if is_sift:
             args.R = 2800
         elif is_mnist:
@@ -39,7 +37,7 @@ def main():
     print("Loading index ...")
     meta_path = libraries.os.path.join(args.index, "meta.json")
     
-    # Read meta data, including new image dimensions
+    # ---- Read meta data, including new image dimensions ----
     if libraries.os.path.exists(meta_path):
         meta = libraries.json.load(open(meta_path))
         num_vectors = meta["n_vectors"]
@@ -91,39 +89,29 @@ def main():
             model.load_state_dict(sd)
             model.eval()
         else:
-            # fallback: try to initialize CNN but load with strict=False to allow partial matches
-            try:
-                model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=m)
-                model.load_state_dict(sd, strict=False)
-                model.eval()
-                print("Warning: loaded model.pth with fallback CNN (strict=False).")
-            except Exception:
-                raise RuntimeError("Could not infer model architecture from saved state_dict. Please ensure the saved model matches the search-time model.")
+            raise RuntimeError("Could not infer model architecture from saved state_dict. Please ensure the saved model matches the search-time model.")
     else:
         print("Warning: model.pth not found. Skipping model loading/hashing.")
 
     inverted = {}
     if libraries.os.path.exists(inverted_path):
         inverted = np.load(inverted_path, allow_pickle=True).item()
-        print(f"Loaded inverted file with {len(inverted)} bins.")
     else:
-        print("Warning: inverted_file.npy not found. Skipping LSH search.")
+        raise RuntimeError("Error: inverted_file.npy not found.")
 
     # --- Load Data and Normalize ---
-    # Load dataset / queries depending on type. If the dataset is SIFT use the
-    # SIFT loader (fvecs). Otherwise assume IDX images.
+    # Load dataset / queries depending on type. Normalize as needed.
     if is_sift:
-        print("Loading SIFT dataset and queries (fvecs) ...")
-
+        # load SIFT vectors
         X, num_images, num_rows, num_cols = load_sift_vectors(args.dataset)
-
         # Checks that everything is fine between the meta data and the actual data
         if img_rows != num_rows:
             raise ValueError(f"Invalid rows number in the images: {img_rows} != {num_rows}")
         
         if img_cols != num_cols:
             raise ValueError(f"Invalid columns number in the images: {img_cols} != {num_cols}")
-            
+
+        # Load query SIFT vectors 
         Q, num_images, num_rows, num_cols = load_sift_vectors(args.query)
 
         # Checks that everything is fine between the meta data and the actual data
@@ -132,10 +120,8 @@ def main():
         
         if img_cols != num_cols:
             raise ValueError(f"Invalid columns number in the query images: {img_cols} != {num_cols}")
-            
-        print(f"Loaded SIFT data shapes: X={X.shape}, Q={Q.shape}")
+
     else:
-        print(f"Loading dataset and queries with shape (N, 1, {img_rows}, {img_cols}) ...")
         # load IDX images (MNIST)
         X, num_images, num_rows, num_cols = load_idx_images(args.dataset)
 
@@ -145,7 +131,8 @@ def main():
         
         if img_cols != num_cols:
             raise ValueError(f"Invalid columns number in the images: {img_cols} != {num_cols}")
-            
+
+        # Load query IDX images
         Q, num_images, num_rows, num_cols = load_idx_images(args.query)
 
         # Checks that everything is fine between the query data and the actual MNIST data
@@ -154,12 +141,12 @@ def main():
         
         if img_cols != num_cols:
             raise ValueError(f"Invalid columns number in the query images: {img_cols} != {num_cols}")
-            
+
+
     # Normalize depending on dataset type.
     # - For image/IDX data (MNIST) scale 0-255 -> 0.0-1.0
     # - For SIFT (fvecs) do L2 normalization per-vector to match training preprocessing
     if args.type and args.type.lower().startswith('sift'):
-        # Ensure float32 and L2-normalize each vector (flattened)
         X = X.astype(np.float32, copy=False)
         Q = Q.astype(np.float32, copy=False)
         X_flat = X.reshape(X.shape[0], -1)
@@ -181,18 +168,12 @@ def main():
         X = X_flat.reshape(X.shape[0], 1, 1, -1)
         Q = Q_flat.reshape(Q.shape[0], 1, 1, -1)
     else:
-        # image data
-
         # Keep raw flattened image vectors before scaling to [0,1]
         X_flat_raw = X.reshape(X.shape[0], -1).astype(np.float32, copy=True)
         Q_flat_raw = Q.reshape(Q.shape[0], -1).astype(np.float32, copy=True)
 
         X = X / 255.0
         Q = Q / 255.0
-
-    
-    print(f"Dataset shape: {X.shape}, Query shape: {Q.shape}")
-    print(f"Attempting to find {args.N} neighbors using Neural LSH (T={args.T}).")
 
     # --- Neural LSH Search ---
     R = args.R
@@ -210,17 +191,14 @@ def main():
     # --- Compute true neighbors once (normalized space) ---
     n_queries = Q.shape[0]
     if n_queries > 0:
-        # true_neighbors_array, all_t_true = load_or_compute_true_neighbors(
-        #     X, Q, args.dataset, args.query, args.N, true_neighbors_file=None, cache_dir="."
-        # )
-        from libraries import bruteforce_naive as bf_naive
-        true_neighbors, t = bf_naive.load_or_compute_true_neighbors_naive(X, Q, 'dataset', 'query', args.N)
+        true_neighbors_array, all_t_true = load_or_compute_true_neighbors( X, Q, args.dataset, args.query, args.N, true_neighbors_file=None, cache_dir=".")
+        # from libraries import bruteforce_naive as bf_naive
+        # true_neighbors_array, all_t_true = bf_naive.load_or_compute_true_neighbors_naive(X, Q, 'dataset', 'query', args.N)
     else:
         true_neighbors_array = []
 
     if model and inverted:
         # Batch inference and vectorized re-ranking
-        # Tune these if needed
         INFER_BATCH = 256
         CAND_CHUNK = 60000
 
@@ -233,15 +211,13 @@ def main():
         Q_flat_raw_all = Q_flat_raw if 'Q_flat_raw' in locals() else None
 
         n_queries = Q.shape[0]
-        print(libraries.time.strftime("%Y-%m-%d %H:%M:%S", libraries.time.localtime()), f"Processing {n_queries} queries in batches of {INFER_BATCH}...")
         for qi in range(0, n_queries, INFER_BATCH):
             q_slice = slice(qi, min(qi + INFER_BATCH, n_queries))
             q_batch = Q[q_slice]  # shape (b, 1, R, C) or (b,1,1,dim)
             b = q_batch.shape[0]
 
-            # --- Start timing the whole LSH search for this batch ---
+            # Start timing the whole LSH search for this batch 
             t0_batch = libraries.time.perf_counter()
-            print(libraries.time.strftime("%Y-%m-%d %H:%M:%S", libraries.time.localtime()), f"Processing batch starting at query index {qi}...")
             # Run model in batch
             q_tensor = libraries.torch.from_numpy(q_batch.astype(np.float32))
             with libraries.torch.no_grad():
@@ -254,7 +230,6 @@ def main():
             top_bins = np.argsort(probs, axis=1)[:, ::-1][:, :args.T]
 
             # Build per-batch union of candidate indices
-            # We'll collect candidates per-query as well after getting the batch union
             batch_candidates = []
             for row in top_bins:
                 row_candidates = []
@@ -265,7 +240,7 @@ def main():
             # For vectorized re-ranking, also build the union to load chunks efficiently
             union_candidates = np.unique(np.concatenate(batch_candidates)) if len(batch_candidates) > 0 else np.array([], dtype=np.int64)
 
-            # Precompute query norms (for normalized vectors used in ranking)
+            # Precompute query norms for distance computations
             Qb = Q_flat_all[q_slice]  # (b, d)
             Qb_norm_sq = np.sum(Qb * Qb, axis=1)[:, None]
 
@@ -373,12 +348,10 @@ def main():
                 true_idx = true_neighbors_array[q_global_i]
                 if X_flat_raw_all is not None and Q_flat_raw_all is not None:
                     true_dists = np.linalg.norm(
-                        X_flat_raw_all[true_idx] - Q_flat_raw_all[q_global_i], axis=1
-                    )
+                        X_flat_raw_all[true_idx] - Q_flat_raw_all[q_global_i], axis=1)
                 else:
                     true_dists = np.linalg.norm(
-                        X_flat[true_idx] - Q_flat_all[q_global_i], axis=1
-                    )
+                        X_flat[true_idx] - Q_flat_all[q_global_i], axis=1)
 
                 # ---------- Approximation factor ----------
                 if true_dists.size > 0:
@@ -431,10 +404,7 @@ def main():
         print("Skipping LSH search due to missing model or inverted file.")
         all_lsh_neighbors = [np.array([], dtype=int)] * len(Q)
 
-    # ============================================================
-    # Global metrics
-    # ============================================================
-
+    # ---- Global metrics aggregation ----
     if all_AF:
         avg_AF = float(np.nanmean(all_AF))
     else:
@@ -447,8 +417,6 @@ def main():
 
     if all_t_true:
         tTrue_avg = float(all_t_true / len(Q))
-        print(f"Average true search time per query: {tTrue_avg:.6f} seconds")
-        print(f"Total true search time for all queries: {all_t_true:.6f} seconds")
     else:
         tTrue_avg = 0.0
 
@@ -465,10 +433,7 @@ def main():
     else:
         recall_final = 0.0
 
-    # ============================================================
-    # Write output file
-    # ============================================================
-
+    # ---- Write output file ----
     with open(args.output, "w") as f:
         f.write("Neural LSH\n")
 

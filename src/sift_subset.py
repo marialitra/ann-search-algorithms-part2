@@ -5,7 +5,6 @@ def subsample_fvecs(input_file, output_file, k=100000, seed=42):
     """
     Creates a new .fvecs file by randomly subsampling k vectors
     from an input .fvecs file in a memory-efficient way.
-
     Args:
         input_file (str): Path to the source .fvecs file (e.g., 'sift_base.fvecs').
         output_file (str): Path to write the new subsampled file.
@@ -28,7 +27,6 @@ def subsample_fvecs(input_file, output_file, k=100000, seed=42):
             d = libraries.struct.unpack('i', d_bytes)[0]
 
             # Calculate the size of one vector record in bytes
-            # (4 bytes for the int 'd' + d * 4 bytes for the 'd' floats)
             record_size = 4 + (d * 4)
 
             # Get the total file size

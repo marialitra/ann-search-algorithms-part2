@@ -1,3 +1,4 @@
+#common libraries used across multiple files
 import argparse
 import os
 import re
@@ -16,16 +17,13 @@ import subprocess
 import multiprocessing # To detect CPU count
 
 # import from Python existing libraries
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Sequence, Optional
 from collections import Counter as counter
 from torch.cuda.amp import autocast, GradScaler
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 
 # import from user-defined files
-from neural_net import CNNClassifier, MLPClassifier
-from neural_net import mnist_train
-from neural_net import sift_train
+from neural_net import CNNClassifier, MLPClassifier, mnist_train, sift_train
 from parseFiles import load_idx_images, load_sift_vectors, parse_neighbor_file
 from utils import build_csr_from_neighbors, save_output, _slug
-import bruteforce_naive 

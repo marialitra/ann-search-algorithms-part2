@@ -9,7 +9,7 @@ def _slug(s: str) -> str:
     import re
     if s is None:
         return "unknown"
-    
+
     s = str(s)
     s = s.strip().lower()
     s = re.sub(r'[^a-z0-9]+', '_', s)
@@ -35,7 +35,6 @@ def build_csr_from_neighbors(neighbors: Dict[int, List[int]], datasetsize: int =
         out_cols.append(c)
         out_data.append(sorted_values[r, c])
 
-
     rows = [k[0] for k in array.keys()]
     counts = counter(rows)
 
@@ -47,21 +46,10 @@ def build_csr_from_neighbors(neighbors: Dict[int, List[int]], datasetsize: int =
         cum += counts.get(i, 0)
 
     xadj[datasetsize] = cum
-    # print("xadj:")
-    # print(xadj)
 
     adjncy = np.array(out_cols, dtype=np.int32)
-    # print("adjncy")
-    # print(adjncy)
-
     adjwgt = np.array(out_data, dtype=np.int32)
-    # print("adjwgt")
-    # print(adjwgt)
-
     vwgt = np.ones(datasetsize, dtype=np.int32)
-    # print("vwgt")
-    # print(vwgt)
-
     return xadj, adjncy, adjwgt, vwgt
 
 def save_output(model: nn.Module, out_dir: str, X: np.ndarray, y: np.ndarray, img_rows: int, img_cols: int):

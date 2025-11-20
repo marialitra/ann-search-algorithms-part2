@@ -9,7 +9,6 @@ def build_executable():
         return True
 
     print("--- 1. Building executable (running 'make search')... ---")
-
     try:
         build_process = libraries.subprocess.run(["make", "search"], capture_output=True, text=True, check=True)
         print("Build complete: './search' is ready.")
@@ -40,7 +39,6 @@ def run_ivfflat(command_list):
     run_env["OMP_MAX_ACTIVE_LEVELS"] = "2"
 
     print(f"Running command: {' '.join(command_list)}")
-
     try:
         libraries.subprocess.run(
             command_list,
