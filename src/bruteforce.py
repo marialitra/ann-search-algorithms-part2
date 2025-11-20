@@ -1,5 +1,5 @@
 import libraries
-from libraries import np, List, Tuple, _slug
+from libraries import np, List, Tuple, _slug, time
 
 # --- Brute-Force and Caching Logic ---
 
@@ -56,6 +56,8 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
     top_idx = np.empty((nq, N), dtype=np.int64)
     top_dist = np.full((nq, N), np.inf, dtype=np.float32)
 
+    start_time = time.perf_counter()
+
     # Precompute squared norms of dataset in chunks on the fly
     for qi in range(0, nq, Q_BATCH):
         q_slice = slice(qi, min(qi + Q_BATCH, nq))
@@ -100,6 +102,9 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
                 top_dist[qj] = cand_dists[order]
                 top_idx[qj] = cand_idx[order]
 
+    end_time = time.perf_counter()
+    elapsed_time = end_time - start_time
+
     # After processing all chunks, top_idx contains indices of nearest neighbors
     true_neighbors_indices = top_idx.astype(np.int64)
 
@@ -112,7 +117,8 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
             "N": int(N),
             "dataset_size": int(n),
             "query_size": int(nq),
-            "dim": int(dimq)
+            "dim": int(dimq),
+            "time_seconds": elapsed_time  # store total computation time
         }
         with open(meta_path, "w") as fh:
             libraries.json.dump(meta, fh, indent=2)
@@ -122,7 +128,7 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
         print(f"Warning: could not save true neighbors or meta: {e}")
 
     print("-" * 50)
-    return true_neighbors_indices
+    return true_neighbors_indices, elapsed_time
 
 def load_or_compute_true_neighbors(X: np.ndarray, Q: np.ndarray, datasetName: str, queryName: str,
                                    N: int, true_neighbors_file: str = None, cache_dir: str = ".") -> np.ndarray:
@@ -179,8 +185,9 @@ def load_or_compute_true_neighbors(X: np.ndarray, Q: np.ndarray, datasetName: st
                 print("Cached array shape mismatch; recomputing...")
                 return find_and_save_true_neighbors(X_flat, Q_flat, N, arr_path, datasetName, queryName)
 
-            print(f"Loaded cached true neighbors from {arr_path}")
-            return true_neighbors
+            t_true = float(meta.get("time_seconds", 0.0))
+            print(f"Loaded cached true neighbors from {arr_path} (original compute time t={t_true:.6f}s)")
+            return true_neighbors, t_true
 
         except Exception as e:
             print(f"Error reading cache files ({e}); recomputing...")

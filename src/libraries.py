@@ -28,3 +28,4 @@ from neural_net import mnist_train
 from neural_net import sift_train
 from parseFiles import load_idx_images, load_sift_vectors, parse_neighbor_file
 from utils import build_csr_from_neighbors, save_output, _slug
+import bruteforce_naive 

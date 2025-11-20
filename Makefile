@@ -23,8 +23,8 @@ SEED_SIFT := 42
 INPUT_FILE := ./Data/MNIST/train-images.idx3-ubyte
 INDEX_PATH:= nlsh_index_mnist
 DATASET_TYPE := MNIST
-KNN_NEIGHBORS := 5
-NUM_BLOCKS := 2000
+KNN_NEIGHBORS := 30
+NUM_BLOCKS := 10000
 IMBALANCE := 0.1
 KAHIP_MODE := 0 # 1 equals ECO mode
 NUM_LAYERS := 3
@@ -97,16 +97,17 @@ siftSearch:
   -i nlsh_index_sift \
   -o output.txt \
   -type sift \
-  -N 5 -R 2 -T 90 -range FALSE
+  -N 5 -R 300 -T 90 -range TRUE
 
 mnistSearch:
+	OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 	python3 ./src/nlsh_search.py \
   -d ./Data/MNIST/train-images.idx3-ubyte \
   -q ./Data/MNIST/t10k-images.idx3-ubyte \
   -i nlsh_index_mnist \
   -o output.txt \
   -type MNIST \
-  -N 5 -R 2 -T 90 -range FALSE
+  -N 5 -R 300 -T 100 -range TRUE
 
 
 # ==============================================================

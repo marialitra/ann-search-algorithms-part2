@@ -17,15 +17,19 @@ def main():
     p.add_argument("-T", type=int, default=5, help="Number of bins to probe (multi-probe)")
     p.add_argument("-range", type=str, default="true", help="Range search flag")
     args = p.parse_args()
+    print(libraries.time.strftime("%Y-%m-%d %H:%M:%S", libraries.time.localtime()), "Starting Neural LSH search...")
+
+    is_mnist = args.type and args.type.lower().startswith("mnist")
+    is_sift = args.type and args.type.lower().startswith("sift")
 
     # --- Setup default R ---
     if args.R < 0:
         # Meaning that no given value has been given, or a wrong one detected,
         # We are going to use the defaut values for each dataset type
 
-        if args.type and args.type.lower().startswith('sift'):
+        if is_sift:
             args.R = 2800
-        elif args.type and args.type.lower().startswith('mnist'):
+        elif is_mnist:
             args.R = 2000
         else:
             print("Not acceptable dataset type")
@@ -66,15 +70,15 @@ def main():
         # if it contains keys starting with 'net.' it's the MLP implementation.
         sd_keys = list(sd.keys()) if isinstance(sd, dict) else []
 
-        if any(k.startswith('conv1') or k.startswith('conv1.0') for k in sd_keys):
+        if any(k.startswith("conv1") or k.startswith("conv1.0") for k in sd_keys):
             # CNN checkpoint
             model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=m)
             model.load_state_dict(sd)
             model.eval()
-        elif any(k.startswith('net.') for k in sd_keys):
+        elif any(k.startswith("net.") for k in sd_keys):
             # MLP checkpoint: infer hidden size and number of linear layers
             # find keys of the form 'net.<i>.weight'
-            linear_keys = [k for k in sd_keys if k.startswith('net.') and k.endswith('.weight')]
+            linear_keys = [k for k in sd_keys if k.startswith("net.") and k.endswith(".weight")]
             if not linear_keys:
                 raise RuntimeError("Saved state_dict looks like an MLP but no linear weights found.")
             # pick the first linear weight to infer hidden size and input dim
@@ -108,7 +112,7 @@ def main():
     # --- Load Data and Normalize ---
     # Load dataset / queries depending on type. If the dataset is SIFT use the
     # SIFT loader (fvecs). Otherwise assume IDX images.
-    if args.type and args.type.lower().startswith('sift'):
+    if is_sift:
         print("Loading SIFT dataset and queries (fvecs) ...")
 
         X, num_images, num_rows, num_cols = load_sift_vectors(args.dataset)
@@ -160,6 +164,12 @@ def main():
         Q = Q.astype(np.float32, copy=False)
         X_flat = X.reshape(X.shape[0], -1)
         Q_flat = Q.reshape(Q.shape[0], -1)
+
+        # Preserve raw flattened vectors before L2-normalization so we can
+        # compute distances in the original (raw) space later.
+        X_flat_raw = X_flat.copy()
+        Q_flat_raw = Q_flat.copy()
+
         # Guard against zero norms
         X_norms = np.linalg.norm(X_flat, axis=1, keepdims=True)
         X_norms[X_norms == 0] = 1.0
@@ -172,32 +182,66 @@ def main():
         Q = Q_flat.reshape(Q.shape[0], 1, 1, -1)
     else:
         # image data
+
+        # Keep raw flattened image vectors before scaling to [0,1]
+        X_flat_raw = X.reshape(X.shape[0], -1).astype(np.float32, copy=True)
+        Q_flat_raw = Q.reshape(Q.shape[0], -1).astype(np.float32, copy=True)
+
         X = X / 255.0
         Q = Q / 255.0
+
     
     print(f"Dataset shape: {X.shape}, Query shape: {Q.shape}")
     print(f"Attempting to find {args.N} neighbors using Neural LSH (T={args.T}).")
 
     # --- Neural LSH Search ---
+    R = args.R
+    range_enabled = (args.range.lower() == "true")
+
     results = []
-    all_lsh_neighbors = [] 
+    all_lsh_neighbors = []
+
+    # --- Metrics containers ---
+    all_lsh_neighbors: List[np.ndarray] = []
+    all_AF = []
+    all_t_approx = []
+    all_t_true = []
     
+    # --- Compute true neighbors once (normalized space) ---
+    n_queries = Q.shape[0]
+    if n_queries > 0:
+        # true_neighbors_array, all_t_true = load_or_compute_true_neighbors(
+        #     X, Q, args.dataset, args.query, args.N, true_neighbors_file=None, cache_dir="."
+        # )
+        from libraries import bruteforce_naive as bf_naive
+        true_neighbors, t = bf_naive.load_or_compute_true_neighbors_naive(X, Q, 'dataset', 'query', args.N)
+    else:
+        true_neighbors_array = []
+
     if model and inverted:
         # Batch inference and vectorized re-ranking
         # Tune these if needed
-        INFER_BATCH = 128
-        CAND_CHUNK = 10000
+        INFER_BATCH = 256
+        CAND_CHUNK = 60000
 
         # Pre-flatten dataset (view when plibraries.ossible)
         X_flat = X.reshape(X.shape[0], -1).astype(np.float32, copy=False)
         Q_flat_all = Q.reshape(Q.shape[0], -1).astype(np.float32, copy=False)
 
+        # Keep references to the original/raw flattened arrays if we saved them
+        X_flat_raw_all = X_flat_raw if 'X_flat_raw' in locals() else None
+        Q_flat_raw_all = Q_flat_raw if 'Q_flat_raw' in locals() else None
+
         n_queries = Q.shape[0]
+        print(libraries.time.strftime("%Y-%m-%d %H:%M:%S", libraries.time.localtime()), f"Processing {n_queries} queries in batches of {INFER_BATCH}...")
         for qi in range(0, n_queries, INFER_BATCH):
             q_slice = slice(qi, min(qi + INFER_BATCH, n_queries))
             q_batch = Q[q_slice]  # shape (b, 1, R, C) or (b,1,1,dim)
             b = q_batch.shape[0]
 
+            # --- Start timing the whole LSH search for this batch ---
+            t0_batch = libraries.time.perf_counter()
+            print(libraries.time.strftime("%Y-%m-%d %H:%M:%S", libraries.time.localtime()), f"Processing batch starting at query index {qi}...")
             # Run model in batch
             q_tensor = libraries.torch.from_numpy(q_batch.astype(np.float32))
             with libraries.torch.no_grad():
@@ -221,46 +265,80 @@ def main():
             # For vectorized re-ranking, also build the union to load chunks efficiently
             union_candidates = np.unique(np.concatenate(batch_candidates)) if len(batch_candidates) > 0 else np.array([], dtype=np.int64)
 
-            # Precompute query norms
+            # Precompute query norms (for normalized vectors used in ranking)
             Qb = Q_flat_all[q_slice]  # (b, d)
             Qb_norm_sq = np.sum(Qb * Qb, axis=1)[:, None]
+
+            # If raw flattened vectors were preserved, prepare raw query norms
+            Qb_raw = None
+            Qb_raw_norm_sq = None
+            if range_enabled and Q_flat_raw_all is not None:
+                Qb_raw = Q_flat_raw_all[q_slice]
+                Qb_raw_norm_sq = np.sum(Qb_raw * Qb_raw, axis=1)[:, None]
 
             # Prepare arrays to hold top-N for each query in batch
             top_idx = np.full((b, args.N), -1, dtype=np.int64)
             top_dist = np.full((b, args.N), np.inf, dtype=np.float32)
+            # Prepare per-batch containers for range neighbors (R-near)
+            batch_range_neighbors = [list() for _ in range(b)] if range_enabled else None
 
             if union_candidates.size > 0:
                 # Process union_candidates in chunks to limit memory
+                R2 = (R * R) if range_enabled else None
                 for xi in range(0, union_candidates.size, CAND_CHUNK):
                     chunk = union_candidates[xi:xi + CAND_CHUNK]
+                    # Normalized vectors used for ranking
                     Xc = X_flat[chunk]  # (chunk_size, d)
                     Xc_norm_sq = np.sum(Xc * Xc, axis=1)[None, :]
 
-                    # compute distances (b, chunk_size)
+                    # compute distances (b, chunk_size) in normalized space for ranking
                     prod = Qb @ Xc.T
                     dist_sq = Qb_norm_sq - 2.0 * prod + Xc_norm_sq
 
+                    # If range search enabled, prefer raw-space distance checks when
+                    # raw flattened arrays are available (keeps R units consistent).
+                    if range_enabled:
+                        if X_flat_raw_all is not None and Qb_raw is not None:
+                            Xc_raw = X_flat_raw_all[chunk]
+                            Xc_raw_norm_sq = np.sum(Xc_raw * Xc_raw, axis=1)[None, :]
+                            prod_raw = Qb_raw @ Xc_raw.T
+                            dist_sq_raw = Qb_raw_norm_sq - 2.0 * prod_raw + Xc_raw_norm_sq
+                            # For each query, find hits within raw R^2 and add global indices
+                            for j in range(b):
+                                hits = np.nonzero(dist_sq_raw[j] <= R2)[0]
+                                if hits.size:
+                                    batch_range_neighbors[j].extend((chunk[hits]).tolist())
+                        else:
+                            # Fall back to using the normalized-space distances for range tests
+                            for j in range(b):
+                                hits = np.nonzero(dist_sq[j] <= R2)[0]
+                                if hits.size:
+                                    batch_range_neighbors[j].extend((chunk[hits]).tolist())
+
                     # For each query, get local top-N within this chunk and merge
                     kth = min(args.N, dist_sq.shape[1] - 1)
+                    # select up to args.N local candidates per query from this chunk
                     local_idx = np.argpartition(dist_sq, kth, axis=1)[:, :args.N]
                     rows = np.arange(dist_sq.shape[0])[:, None]
                     local_dists = dist_sq[rows, local_idx]
                     # map local indices to global dataset indices
                     global_indices = chunk[local_idx]
 
-                    # Merge per-query
-                    for j in range(b):
-                        cand_dists = np.concatenate([top_dist[j], local_dists[j]])
-                        cand_idx = np.concatenate([top_idx[j], global_indices[j]])
-                        # pick top args.N
-                        if cand_dists.size <= args.N:
-                            order = np.argsort(cand_dists)
-                        else:
-                            order = np.argpartition(cand_dists, args.N)[:args.N]
-                            order = order[np.argsort(cand_dists[order])]
-                        top_dist[j] = cand_dists[order]
-                        top_idx[j] = cand_idx[order]
+                    # Vectorized merge: combine existing top-N and local candidates, then select top-N
+                    # cand_dists: (b, N + k), cand_idx: (b, N + k)
+                    cand_dists = np.concatenate([top_dist, local_dists], axis=1)
+                    cand_idx = np.concatenate([top_idx, global_indices], axis=1)
+                    # Select indices of smallest args.N distances per row
+                    part = np.argpartition(cand_dists, args.N, axis=1)[:, :args.N]
+                    row_idx = np.arange(b)[:, None]
+                    selected_dists = cand_dists[row_idx, part]
+                    selected_idx = cand_idx[row_idx, part]
+                    # Now sort selected distances within each row
+                    order_within = np.argsort(selected_dists, axis=1)
+                    top_dist = np.take_along_axis(selected_dists, order_within, axis=1)
+                    top_idx = np.take_along_axis(selected_idx, order_within, axis=1)
 
+            total_range_time = 0.0
             # For each query in batch, finalize neighbors and distances
             for local_i in range(b):
                 q_global_i = qi + local_i
@@ -272,133 +350,123 @@ def main():
                     # top_idx contains dataset indices
                     neighbors = top_idx[local_i]
                     distances = np.sqrt(top_dist[local_i])
-
                 all_lsh_neighbors.append(neighbors)
 
-                result_lines = [f"Query: {q_global_i}"]
-                for j, (nid, dist) in enumerate(zip(neighbors, distances), 1):
-                    result_lines.append(f"Nearest neighbor-{j}: {int(nid)}")
-                    result_lines.append(f"distanceApproximate: {float(dist):.4f}")
-                results.append("\n".join(result_lines))
+                # ---------- Approx distances: use stored top-N squared distances for normalized-space
+                approx_dists_norm = np.sqrt(top_dist[local_i]) if top_dist.shape[1] > 0 else np.array([], dtype=np.float32)
+                # Compute raw-space approximate distances only for the final top-N (if raw arrays present)
+                if X_flat_raw_all is not None and Q_flat_raw_all is not None and neighbors.size > 0:
+                    approx_dists_raw = np.linalg.norm(
+                        X_flat_raw_all[neighbors] - Q_flat_raw_all[q_global_i], axis=1
+                    )
+                else:
+                    approx_dists_raw = approx_dists_norm
+                range_time_start = libraries.time.perf_counter()
+
+                # If no approximate neighbors, record empty block and continue
+                if neighbors.size == 0:
+                    block = [f"Query: {q_global_i}", "(No neighbors)"]
+                    results.append("\n".join(block))
+                    continue
+
+                # ---------- True distances timing (raw-space) ----------
+                true_idx = true_neighbors_array[q_global_i]
+                if X_flat_raw_all is not None and Q_flat_raw_all is not None:
+                    true_dists = np.linalg.norm(
+                        X_flat_raw_all[true_idx] - Q_flat_raw_all[q_global_i], axis=1
+                    )
+                else:
+                    true_dists = np.linalg.norm(
+                        X_flat[true_idx] - Q_flat_all[q_global_i], axis=1
+                    )
+
+                # ---------- Approximation factor ----------
+                if true_dists.size > 0:
+                    AF = sum(approx_dists_raw) / sum(true_dists)
+                else:
+                    AF = np.nan
+                all_AF.append(AF)
+
+
+                # Finalize range neighbors for this query (deduplicate and sort)
+                if range_enabled and union_candidates.size > 0:
+                    rr = np.unique(np.array(batch_range_neighbors[local_i], dtype=np.int64))
+                else:
+                    rr = np.array([], dtype=np.int64)
+
+                # Use precomputed R-near lists collected during the LSH pass
+                if range_enabled:
+                    r_neighbors = rr if q_global_i < len(Q) else np.array([], dtype=np.int64)
+                else:
+                    r_neighbors = np.array([], dtype=np.int64)
+
+                # ---------- Build output block ----------
+                block = [f"Query: {q_global_i}"]
+                for k in range(min(args.N, neighbors.size)):
+                    block.append(f"Nearest neighbor-{k+1}: {int(neighbors[k])}")
+                    block.append(f"distanceApproximate: {float(approx_dists_raw[k]):.4f}")
+                    block.append(f"distanceTrue: {float(true_dists[k]):.4f}")
+
+                if range_enabled and r_neighbors.size > 0:
+                    block.append("R-near neighbors:")
+                    for rid in r_neighbors:
+                        block.append(str(int(rid)))
+
+                results.append("\n".join(block))
+
+                range_time_end = libraries.time.perf_counter()
+                total_range_time += (range_time_end - range_time_start)
+
+            # --- End timing ---
+            t1_batch = libraries.time.perf_counter()
+            t1_batch_real = t1_batch - total_range_time
+            batch_time = t1_batch_real - t0_batch
+
+            # Distribute batch_time equally across queries in the batch
+            t_per_query = batch_time / b
+            all_t_approx.extend([t_per_query] * b)
 
             print(f"Processed {min(qi + INFER_BATCH, n_queries)}/{n_queries} queries for LSH search ...")
-    
     else:
         print("Skipping LSH search due to missing model or inverted file.")
         all_lsh_neighbors = [np.array([], dtype=int)] * len(Q)
 
+    # ============================================================
+    # Global metrics
+    # ============================================================
 
-    # --- Evaluation ---
-    if len(Q) > 0:
-        true_neighbors_array = load_or_compute_true_neighbors(
-            X, Q, args.dataset, args.query, args.N, true_neighbors_file=None, cache_dir="."
-        )
-        
-        # 2. Calculate Recall
-        calculate_recall(true_neighbors_array, all_lsh_neighbors, args.N)
+    if all_AF:
+        avg_AF = float(np.nanmean(all_AF))
     else:
-        print("No queries to evaluate.")
+        avg_AF = float('nan')
 
+    if all_t_approx:
+        tApprox_avg = float(np.mean(all_t_approx))
+    else:
+        tApprox_avg = 0.0
 
+    if all_t_true:
+        tTrue_avg = float(all_t_true / len(Q))
+        print(f"Average true search time per query: {tTrue_avg:.6f} seconds")
+        print(f"Total true search time for all queries: {all_t_true:.6f} seconds")
+    else:
+        tTrue_avg = 0.0
 
-    # ============================================================
-    # Compute metrics per query
-    # ============================================================
+    if all_t_approx:
+        total_approx_time = float(np.sum(all_t_approx))
+    else:
+        total_approx_time = 1e-9
 
-    all_AF = []                  # Approximation Factor per query
-    all_range_neighbors = []     # Range search neighbors per query
-    all_t_approx = []            # Approximate time per query
-    all_t_true = []              # True time per query
+    QPS = (len(Q) / total_approx_time) if total_approx_time > 0 else 0.0
 
-    R = args.R if args.R > 0 else (2000 if args.type == "mnist" else 2800)
-    range_enabled = (args.range.lower() == "true")
-
-    print("Computing metrics for each query...")
-
-    results = []
-
-    for qi in range(len(all_lsh_neighbors)):
-
-        approx_idx = all_lsh_neighbors[qi]                 # approximate neighbors
-        true_idx = true_neighbors_array[qi]               # true neighbors
-
-        if len(approx_idx) == 0 or approx_idx[0] < 0:
-            # no neighbors case
-            results.append(f"Query: {qi}\n(No neighbors)\n")
-            continue
-
-        # -------------------------------------------
-        # Compute approximate distances with timing
-        # -------------------------------------------
-        t0 = libraries.time.perf_counter()
-        approx_dists = np.linalg.norm(X_flat[approx_idx] - Q_flat_all[qi], axis=1)
-        t1 = libraries.time.perf_counter()
-        all_t_approx.append(t1 - t0)
-
-        # -------------------------------------------
-        # Compute true distances with timing
-        # -------------------------------------------
-        t0 = libraries.time.perf_counter()
-        true_dists = np.linalg.norm(X_flat[true_idx] - Q_flat_all[qi], axis=1)
-        t1 = libraries.time.perf_counter()
-        all_t_true.append(t1 - t0)
-
-        # -------------------------------------------
-        # Approximation Factor (AF)
-        # AF = d_approx(1) / d_true(1)
-        # -------------------------------------------
-        if true_dists[0] > 0:
-            AF = approx_dists[0] / true_dists[0]
-        else:
-            AF = 1.0  # edge case
-        all_AF.append(AF)
-
-        # -------------------------------------------
-        # Range Search R-near neighbors
-        # -------------------------------------------
-        if range_enabled:
-            d_all = np.linalg.norm(X_flat - Q_flat_all[qi], axis=1)
-            r_neighbors = np.where(d_all <= R)[0]
-        else:
-            r_neighbors = np.array([])
-        all_range_neighbors.append(r_neighbors)
-
-        # -------------------------------------------
-        # Build formatted block for this query
-        # -------------------------------------------
-
-        block = []
-        block.append(f"Query: {qi}")
-
-        for k in range(args.N):
-            block.append(f"Nearest neighbor-{k+1}: {int(approx_idx[k])}")
-            block.append(f"distanceApproximate: {float(approx_dists[k]):.4f}")
-            block.append(f"distanceTrue: {float(true_dists[k]):.4f}")
-
-        if range_enabled:
-            block.append("R-near neighbors:")
-            for rid in r_neighbors:
-                block.append(str(int(rid)))
-
-        results.append("\n".join(block))
-
+    # Recall
+    if n_queries > 0:
+        recall_final = float(calculate_recall(true_neighbors_array, all_lsh_neighbors, args.N))
+    else:
+        recall_final = 0.0
 
     # ============================================================
-    # Compute global metrics
-    # ============================================================
-
-    avg_AF = float(np.mean(all_AF)) if all_AF else 0.0
-    recall_final = float(calculate_recall(true_neighbors_array, all_lsh_neighbors, args.N))
-    tApprox_avg = float(np.mean(all_t_approx)) if all_t_approx else 0.0
-    tTrue_avg = float(np.mean(all_t_true)) if all_t_true else 0.0
-
-    # QPS = queries per second for approximate search
-    total_approx_time = sum(all_t_approx) if all_t_approx else 1e-9
-    QPS = len(all_lsh_neighbors) / total_approx_time
-
-
-    # ============================================================
-    # Write final output file (EXACT FORMAT)
+    # Write output file
     # ============================================================
 
     with open(args.output, "w") as f:
@@ -414,7 +482,6 @@ def main():
         f.write(f"tTrueAverage: {tTrue_avg:.6f}\n")
 
     print(f"Wrote output file to {args.output}")
-
 
 
 if __name__ == "__main__":
