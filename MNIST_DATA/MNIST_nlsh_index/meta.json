@@ -1,7 +1,0 @@
-{
-  "n_vectors": 60000,
-  "dim": 784,
-  "n_bins": 2000,
-  "img_rows": 28,
-  "img_cols": 28
-}

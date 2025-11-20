@@ -7,19 +7,33 @@ Classifier = None
 
 def main():
     p = libraries.argparse.ArgumentParser(description="Neural LSH search phase.")
-    p.add_argument("-d", "--dataset", required=True, help="dataset file (IDX or fvecs)")
-    p.add_argument("-q", "--query", required=True, help="query file (IDX or fvecs)")
-    p.add_argument("-i", "--index_dir", required=True, help="path to built index directory")
-    p.add_argument("-o", "--output", required=True, help="output results file")
-    p.add_argument("-type", help="type of the given dataset (MNIST or SIFT1M)")
-    p.add_argument("-N", type=int, default=10, help="number of nearest neighbors to report")
-    p.add_argument("-T", type=int, default=5, help="number of bins to probe (multi-probe)")
-    p.add_argument("-range", type=str, default="false", help="range search flag")
+    p.add_argument("-d", "--dataset", required=True, type=str, help="Dataset file")
+    p.add_argument("-q", "--query", required=True, type=str, help="Query file")
+    p.add_argument("-i", "--index", required=True, type=str, help="Path to built index directory")
+    p.add_argument("-o", "--output", required=True, type=str, help="Output results file")
+    p.add_argument("-type", required=True, type=str, help="Type of the given dataset (MNIST or SIFT1M)")
+    p.add_argument("-N", type=int, default=1, help="Number of nearest neighbors to report")
+    p.add_argument("-R", type=float, default=-2, help="Distance for range search if enable")
+    p.add_argument("-T", type=int, default=5, help="Number of bins to probe (multi-probe)")
+    p.add_argument("-range", type=str, default="true", help="Range search flag")
     args = p.parse_args()
+
+    # --- Setup default R ---
+    if args.R < 0:
+        # Meaning that no given value has been given, or a wrong one detected,
+        # We are going to use the defaut values for each dataset type
+
+        if args.type and args.type.lower().startswith('sift'):
+            args.R = 2800
+        elif args.type and args.type.lower().startswith('mnist'):
+            args.R = 2000
+        else:
+            print("Not acceptable dataset type")
+            exit()
 
     # --- Setup ---
     print("Loading index ...")
-    meta_path = libraries.os.path.join(args.index_dir, "meta.json")
+    meta_path = libraries.os.path.join(args.index, "meta.json")
     
     # Read meta data, including new image dimensions
     if libraries.os.path.exists(meta_path):
@@ -33,8 +47,8 @@ def main():
         print("Warning: meta.json not found.")
         exit()
 
-    model_path = libraries.os.path.join(args.index_dir, "model.pth")
-    inverted_path = libraries.os.path.join(args.index_dir, "inverted_file.npy")
+    model_path = libraries.os.path.join(args.index, "model.pth")
+    inverted_path = libraries.os.path.join(args.index, "inverted_file.npy")
     
     model = None
     if libraries.os.path.exists(model_path):
@@ -276,11 +290,6 @@ def main():
 
     # --- Evaluation ---
     if len(Q) > 0:
-        # 1. Load or compute true neighbors (cached step)
-        # true_neighbors_array = load_or_compute_true_neighbors(
-        #     X, Q, args.dataset, args.query, args.N, "true_neighbors.npy"
-        # )
-        
         true_neighbors_array = load_or_compute_true_neighbors(
             X, Q, args.dataset, args.query, args.N, true_neighbors_file=None, cache_dir="."
         )
@@ -291,12 +300,122 @@ def main():
         print("No queries to evaluate.")
 
 
-    # write LSH results to output file
+
+    # ============================================================
+    # Compute metrics per query
+    # ============================================================
+
+    all_AF = []                  # Approximation Factor per query
+    all_range_neighbors = []     # Range search neighbors per query
+    all_t_approx = []            # Approximate time per query
+    all_t_true = []              # True time per query
+
+    R = args.R if args.R > 0 else (2000 if args.type == "mnist" else 2800)
+    range_enabled = (args.range.lower() == "true")
+
+    print("Computing metrics for each query...")
+
+    results = []
+
+    for qi in range(len(all_lsh_neighbors)):
+
+        approx_idx = all_lsh_neighbors[qi]                 # approximate neighbors
+        true_idx = true_neighbors_array[qi]               # true neighbors
+
+        if len(approx_idx) == 0 or approx_idx[0] < 0:
+            # no neighbors case
+            results.append(f"Query: {qi}\n(No neighbors)\n")
+            continue
+
+        # -------------------------------------------
+        # Compute approximate distances with timing
+        # -------------------------------------------
+        t0 = libraries.time.perf_counter()
+        approx_dists = np.linalg.norm(X_flat[approx_idx] - Q_flat_all[qi], axis=1)
+        t1 = libraries.time.perf_counter()
+        all_t_approx.append(t1 - t0)
+
+        # -------------------------------------------
+        # Compute true distances with timing
+        # -------------------------------------------
+        t0 = libraries.time.perf_counter()
+        true_dists = np.linalg.norm(X_flat[true_idx] - Q_flat_all[qi], axis=1)
+        t1 = libraries.time.perf_counter()
+        all_t_true.append(t1 - t0)
+
+        # -------------------------------------------
+        # Approximation Factor (AF)
+        # AF = d_approx(1) / d_true(1)
+        # -------------------------------------------
+        if true_dists[0] > 0:
+            AF = approx_dists[0] / true_dists[0]
+        else:
+            AF = 1.0  # edge case
+        all_AF.append(AF)
+
+        # -------------------------------------------
+        # Range Search R-near neighbors
+        # -------------------------------------------
+        if range_enabled:
+            d_all = np.linalg.norm(X_flat - Q_flat_all[qi], axis=1)
+            r_neighbors = np.where(d_all <= R)[0]
+        else:
+            r_neighbors = np.array([])
+        all_range_neighbors.append(r_neighbors)
+
+        # -------------------------------------------
+        # Build formatted block for this query
+        # -------------------------------------------
+
+        block = []
+        block.append(f"Query: {qi}")
+
+        for k in range(args.N):
+            block.append(f"Nearest neighbor-{k+1}: {int(approx_idx[k])}")
+            block.append(f"distanceApproximate: {float(approx_dists[k]):.4f}")
+            block.append(f"distanceTrue: {float(true_dists[k]):.4f}")
+
+        if range_enabled:
+            block.append("R-near neighbors:")
+            for rid in r_neighbors:
+                block.append(str(int(rid)))
+
+        results.append("\n".join(block))
+
+
+    # ============================================================
+    # Compute global metrics
+    # ============================================================
+
+    avg_AF = float(np.mean(all_AF)) if all_AF else 0.0
+    recall_final = float(calculate_recall(true_neighbors_array, all_lsh_neighbors, args.N))
+    tApprox_avg = float(np.mean(all_t_approx)) if all_t_approx else 0.0
+    tTrue_avg = float(np.mean(all_t_true)) if all_t_true else 0.0
+
+    # QPS = queries per second for approximate search
+    total_approx_time = sum(all_t_approx) if all_t_approx else 1e-9
+    QPS = len(all_lsh_neighbors) / total_approx_time
+
+
+    # ============================================================
+    # Write final output file (EXACT FORMAT)
+    # ============================================================
+
     with open(args.output, "w") as f:
         f.write("Neural LSH\n")
-        f.write("\n\n".join(results))
 
-    print(f"Search completed. LSH results written to {args.output}")
-  
+        for blk in results:
+            f.write(blk + "\n\n")
+
+        f.write(f"Average AF: {avg_AF:.4f}\n")
+        f.write(f"Recall@{args.N}: {recall_final:.4f}\n")
+        f.write(f"QPS: {QPS:.4f}\n")
+        f.write(f"tApproximateAverage: {tApprox_avg:.6f}\n")
+        f.write(f"tTrueAverage: {tTrue_avg:.6f}\n")
+
+    print(f"Wrote output file to {args.output}")
+
+
+
 if __name__ == "__main__":
     main()

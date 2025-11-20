@@ -1,8 +1,0 @@
-{
-  "dataset_name": "./Data/MNIST/train-images.idx3-ubyte",
-  "query_name": "./Data/MNIST/t10k-images.idx3-ubyte",
-  "N": 4,
-  "dataset_size": 60000,
-  "query_size": 10000,
-  "dim": 784
-}

@@ -4,34 +4,35 @@
 PYTHON := python3
 SCRIPT := ./src/nlsh_build.py
 
-# Example arguments for running the script.
-# NOTE: You need to replace these paths and values with actual files and desired settings.
-
-# INPUT_FILE_SIFT := ./knngraphs/siftfullivfflat_baseneighboring_graph.txt
-# INPUT_FILE_SIFT := ./src/sift5knn.txt
-
-DATASET_FILE_SIFT := ./Data/SIFT/sift_base.fvecs
-# DATASET_FILE_SIFT := ./Data/SIFT/sift_base_100k.fvecs
-OUTPUT_FILE_SIFT:= nlsh_index
+# --- SIFT Variables ---
+INPUT_FILE_SIFT := ./Data/SIFT/sift_base.fvecs
+INDEX_PATH_SIFT:= nlsh_index_sift
 DATASET_TYPE_SIFT := sift
-NUM_BLOCKS_SIFT := 200
+KNN_NEIGHBORS_SIFT := 5
+NUM_BLOCKS_SIFT := 2000
+IMBALANCE_SIFT := 0.1
+KAHIP_MODE_SIFT := 0 # 1 equals ECO mode, 0 equals fast mode
 NUM_LAYERS_SIFT := 3
-NUM_NEURONS_SIFT := 256
+NUM_NEURONS_SIFT := 128
+EPOCHS_SIFT := 3
+BATCH_SIZE_SIFT := 2048
 LEARNING_RATE_SIFT := 0.001
-EPOCHS_SIFT := 20
-BATCH_SIZE_SIFT := 1024
-KNN_NEIGHBORS := 5
+SEED_SIFT := 42
 
-# INPUT_FILE := ./knngraphs/mnistfullivfflat5testset.txt
-DATASET_FILE := ./Data/MNIST/train-images.idx3-ubyte
-OUTPUT_FILE:= nlsh_index
+# --- MNIST Variables ---
+INPUT_FILE := ./Data/MNIST/train-images.idx3-ubyte
+INDEX_PATH:= nlsh_index_mnist
 DATASET_TYPE := MNIST
+KNN_NEIGHBORS := 5
 NUM_BLOCKS := 2000
-NUM_LAYERS := 5
+IMBALANCE := 0.1
+KAHIP_MODE := 0 # 1 equals ECO mode
+NUM_LAYERS := 3
 NUM_NEURONS := 512
+EPOCHS := 3
+BATCH_SIZE := 2048
 LEARNING_RATE := 0.001
-EPOCHS := 20
-BATCH_SIZE := 4098
+SEED := 42
 
 # --- Targets ---
 
@@ -43,32 +44,38 @@ all: run
 sift:
 	@echo "--- Running the script: $(SCRIPT) ---"
 	$(PYTHON) $(SCRIPT) \
-		-d $(DATASET_FILE_SIFT) \
-		-i $(OUTPUT_FILE_SIFT) \
+		-d $(INPUT_FILE_SIFT) \
+		-i $(INDEX_PATH_SIFT) \
 		--type $(DATASET_TYPE_SIFT) \
-		--knn $(KNN_NEIGHBORS) \
+		--knn $(KNN_NEIGHBORS_SIFT) \
 		-m $(NUM_BLOCKS_SIFT) \
+		--imbalance $(IMBALANCE_SIFT) \
+		--kahip_mode $(KAHIP_MODE_SIFT) \
 		--layers $(NUM_LAYERS_SIFT) \
 		--nodes $(NUM_NEURONS_SIFT) \
-		--lr $(LEARNING_RATE_SIFT) \
 		--epochs $(EPOCHS_SIFT) \
-		--batch_size $(BATCH_SIZE_SIFT)
+		--batch_size $(BATCH_SIZE_SIFT) \
+		--lr $(LEARNING_RATE_SIFT) \
+		--seed $(SEED_SIFT) 
 	@echo "-----------------------------------"
 
 
 mnist:
 	@echo "--- Running the script: $(SCRIPT) ---"
 	$(PYTHON) $(SCRIPT) \
-		-d $(DATASET_FILE) \
-		-i $(OUTPUT_FILE) \
+		-d $(INPUT_FILE) \
+		-i $(INDEX_PATH) \
 		--type $(DATASET_TYPE) \
 		--knn $(KNN_NEIGHBORS) \
 		-m $(NUM_BLOCKS) \
+		--imbalance $(IMBALANCE) \
+		--kahip_mode $(KAHIP_MODE) \
 		--layers $(NUM_LAYERS) \
 		--nodes $(NUM_NEURONS) \
-		--lr $(LEARNING_RATE) \
 		--epochs $(EPOCHS) \
-		--batch_size $(BATCH_SIZE)
+		--batch_size $(BATCH_SIZE) \
+		--lr $(LEARNING_RATE) \
+		--seed $(SEED) 
 	@echo "-----------------------------------"
 
 ## clean: Placeholder for cleaning up generated files.
@@ -87,15 +94,30 @@ siftSearch:
 	python3 ./src/nlsh_search.py \
   -d ./Data/SIFT/sift_base.fvecs \
   -q ./Data/SIFT/sift_query.fvecs \
-  -i nlsh_index \
+  -i nlsh_index_sift \
   -o output.txt \
   -type sift \
-  -N 4 -T 20 -range FALSE
+  -N 5 -R 2 -T 90 -range FALSE
 
 mnistSearch:
 	python3 ./src/nlsh_search.py \
   -d ./Data/MNIST/train-images.idx3-ubyte \
   -q ./Data/MNIST/t10k-images.idx3-ubyte \
-  -i nlsh_index \
+  -i nlsh_index_mnist \
   -o output.txt \
-  -N 4 -T 200 -range FALSE
+  -type MNIST \
+  -N 5 -R 2 -T 90 -range FALSE
+
+
+# ==============================================================
+# Build executable: delegate to Ivfflat/Makefile (if present)
+# ==============================================================
+
+# building the native 'search' binary using the Ivfflat subdirectory
+search:
+	@echo "--- Delegating build to Ivfflat/Makefile (make -C Ivfflat) ---"
+	@if [ -d Ivfflat ]; then \
+		$(MAKE) -C Ivfflat; \
+	else \
+		echo "Ivfflat/ directory not found; cannot build 'search'"; exit 1; \
+	fi

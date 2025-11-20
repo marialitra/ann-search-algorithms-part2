@@ -4,8 +4,8 @@ def build_executable():
     """
     Runs 'make search' to compile the executable.
     """
-    if libraries.os.path.exists("./search"):
-        print("--- Executable './search' found. Skipping build. ---")
+    if libraries.os.path.exists("./Ivfflat/search"):
+        print("--- Executable './Ivfflat/search' found. Skipping build. ---")
         return True
 
     print("--- 1. Building executable (running 'make search')... ---")
@@ -23,18 +23,10 @@ def build_executable():
          print("--- ERROR: 'make' command not found. Is it installed? ---")
          return False
 
-def run_ivfflat_sift(command_list):
+def run_ivfflat(command_list):
     """
     Runs the ./search executable with optimized parameters for speed.
     """
-    print("\n--- 2. Running SIFT with OPTIMIZED parameters... ---")
-
-    # --- 1. SETUP PATHS ---
-    dataset_file = "./Data/SIFT/sift_base_100k.fvecs"
-
-    if not libraries.os.path.exists(dataset_file):
-        print(f"--- ERROR: Dataset file '{dataset_file}' not found! ---")
-        return
 
     # --- 2. OPTIMIZATION: Auto-detect CPU cores ---
     # Use all available cores for maximum parallelism
@@ -47,17 +39,7 @@ def run_ivfflat_sift(command_list):
     run_env["OMP_NESTED"] = "TRUE"
     run_env["OMP_MAX_ACTIVE_LEVELS"] = "2"
 
-    # --- 3. OPTIMIZATION: Tuning Parameters ---
-    # Original: -kclusters 40, -nprobe 3
-    # Optimized for 100k points:
-    #   - kclusters: Increased to 100 (closer to sqrt(N)) to make buckets smaller/faster
-    #   - nprobe: Reduced to 1 for maximum speed (trade-off: lower accuracy)
-
-    k_clusters = "40"
-    n_probe = "3"
-
     print(f"Running command: {' '.join(command_list)}")
-    print(f"Optimizations: kclusters={k_clusters}, nprobe={n_probe}, threads={num_cores}")
 
     try:
         libraries.subprocess.run(
@@ -66,14 +48,9 @@ def run_ivfflat_sift(command_list):
             text=True,
             check=True
         )
-        print("\n--- SIFT run complete. ---")
+        print("\n--- Run complete. ---")
 
     except libraries.subprocess.CalledProcessError as e:
-        print(f"--- ERROR: SIFT run failed with return code {e.returncode} ---")
+        print(f"--- ERROR: Run failed with return code {e.returncode} ---")
     except FileNotFoundError:
         print("--- ERROR: './search' executable not found. ---")
-
-# --- Main execution ---
-if __name__ == "__main__":
-    if build_executable():
-        run_ivfflat_sift()

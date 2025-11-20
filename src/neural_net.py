@@ -1,5 +1,6 @@
 import libraries
-from libraries import nn, np, KFold, train_test_split, GradScaler, autocast
+from libraries import nn, np, train_test_split, GradScaler, autocast
+from dataset_utils import make_sift_dataloaders
 
 # Define a simple feedforward neural network (MLP) 
 # class MLPClassifier(nn.Module): 
@@ -93,98 +94,40 @@ def mnist_train(args, img_rows, img_cols, X, y):
     dropout_rate = getattr(args, "dropout_rate", 0.25)
     weight_decay = getattr(args, "weight_decay", 1e-5) # L2 regularization
 
-    kfold = KFold(n_splits=getattr(args, "kfolds", 4), shuffle=True, random_state=42)
+    # Single train/validation split (KFold removed - does not improve recall)
+    # Normalize and split without copying large arrays where possible
+    X_flat = X.reshape(X.shape[0], -1)
+    indices = np.arange(X_flat.shape[0], dtype=np.int64)
+    train_idx, val_idx = train_test_split(indices, test_size=0.1, random_state=42)
 
-    fold_results = []
+    # Build datasets/loaders
+    train_ds = libraries.torch.utils.data.TensorDataset(
+        libraries.torch.from_numpy((X[train_idx].astype(np.float32) / 255.0).copy()),
+        libraries.torch.from_numpy(y[train_idx].copy()).long()
+    )
+    val_ds = libraries.torch.utils.data.TensorDataset(
+        libraries.torch.from_numpy((X[val_idx].astype(np.float32) / 255.0).copy()),
+        libraries.torch.from_numpy(y[val_idx].copy()).long()
+    )
 
-    for fold, (train_idx, val_idx) in enumerate(kfold.split(X)):
-        print("-" * 60)
-        print(f"Fold {fold+1}/{kfold.get_n_splits()}")
+    train_loader = libraries.torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_loader = libraries.torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
 
-        X_train, X_val = X[train_idx], X[val_idx]
-        y_train, y_val = y[train_idx], y[val_idx]
-
-        # Use the new CNNClassifier
-        model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=args.m,
-                              dropout_rate=dropout_rate).to(device)
-                              
-        # Add weight_decay to the optimizer for L2 regularization
-        optimizer = libraries.torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
-        loss_fn = nn.CrossEntropyLoss()
-
-        train_ds = libraries.torch.utils.data.TensorDataset(
-            libraries.torch.from_numpy(X_train.copy()).float() / 255.0, # Normalize here
-            libraries.torch.from_numpy(y_train.copy()).long())
-        val_ds = libraries.torch.utils.data.TensorDataset(
-            libraries.torch.from_numpy(X_val.copy()).float() / 255.0, # Normalize here
-            libraries.torch.from_numpy(y_val.copy()).long())
-
-        train_loader = libraries.torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-        val_loader = libraries.torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
-
-        best_val_loss = float("inf")
-        patience_counter = 0
-        patience = 3
-        best_model_state = None
-
-        for epoch in range(args.epochs):
-            model.train()
-            total_loss = 0.0
-            for xd, yd in train_loader:
-                xd, yd = xd.to(device), yd.to(device)
-                optimizer.zero_grad()
-                logits = model(xd)
-                loss = loss_fn(logits, yd)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-
-            avg_train_loss = total_loss / len(train_loader)
-
-            # Validation loss
-            model.eval()
-            val_loss = 0.0
-            with libraries.torch.no_grad():
-                for xv, yv in val_loader:
-                    xv, yv = xv.to(device), yv.to(device)
-                    val_loss += loss_fn(model(xv), yv).item()
-            avg_val_loss = val_loss / len(val_loader)
-
-            print(f"Epoch {epoch+1}/{args.epochs} - "
-                  f"Train: {avg_train_loss:.4f}, Val: {avg_val_loss:.4f}")
-
-            if avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
-                patience_counter = 0
-                best_model_state = model.state_dict() 
-            else:
-                patience_counter += 1
-                if patience_counter >= patience:
-                    print("Early stopping triggered.")
-                    break
-
-        fold_results.append(best_val_loss)
-        print(f"Fold {fold+1} best val loss: {best_val_loss:.4f}")
-
-    print("-" * 60)
-    print(f"Average validation loss across folds: {np.mean(fold_results):.4f} ± {np.std(fold_results):.4f}")
-
-    # Retrain on full dataset
-    print("Retraining on full dataset with final configuration...")
+    # Instantiate model and optimizer
     model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=args.m,
                           dropout_rate=dropout_rate).to(device)
     optimizer = libraries.torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
     loss_fn = nn.CrossEntropyLoss()
 
-    full_ds = libraries.torch.utils.data.TensorDataset(
-        libraries.torch.from_numpy(X.copy()).float() / 255.0, # Normalize here
-        libraries.torch.from_numpy(y.copy()).long())
-    full_loader = libraries.torch.utils.data.DataLoader(full_ds, batch_size=args.batch_size, shuffle=True)
+    best_val_loss = float("inf")
+    patience_counter = 0
+    patience = 3
+    best_model_state = None
 
     for epoch in range(args.epochs):
         model.train()
         total_loss = 0.0
-        for xd, yd in full_loader:
+        for xd, yd in train_loader:
             xd, yd = xd.to(device), yd.to(device)
             optimizer.zero_grad()
             logits = model(xd)
@@ -192,9 +135,31 @@ def mnist_train(args, img_rows, img_cols, X, y):
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        
-        print(f"[Final Model] Epoch {epoch+1}/{args.epochs} - Loss: {total_loss/len(full_loader):.4f}")
 
+        avg_train_loss = total_loss / len(train_loader)
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with libraries.torch.no_grad():
+            for xv, yv in val_loader:
+                xv, yv = xv.to(device), yv.to(device)
+                val_loss += loss_fn(model(xv), yv).item()
+        avg_val_loss = val_loss / len(val_loader)
+
+        print(f"Epoch {epoch+1}/{args.epochs} - Train: {avg_train_loss:.4f}, Val: {avg_val_loss:.4f}")
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            patience_counter = 0
+            best_model_state = model.state_dict()
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("Early stopping triggered.")
+                break
+
+    print(f"Best val loss: {best_val_loss:.4f}")
     model = model.to("cpu")
     return model
 
@@ -208,16 +173,14 @@ def sift_train(args, img_rows, img_cols, X, y):
     device = libraries.torch.device("cuda" if libraries.torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # SIFT X may be shaped (n,1,1,dim) coming from the loader. Flatten to (n, dim).
+    # SIFT X may be shaped (n,1,1,dim) coming from the loader. Flatten to (n, dim)
+    # We avoid normalizing the entire array in memory (which would copy) and
+    # instead normalize per-sample inside the Dataset (see dataset_utils).
     X = X.reshape(X.shape[0], -1)
 
-    # Normalize SIFT features (important!). Guard against zero-norm vectors.
-    norms = np.linalg.norm(X, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    X = X / norms
-
-    # Split train/val once
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.1, random_state=42)
+    # Split train/val once using indices to avoid copying large arrays
+    indices = np.arange(X.shape[0], dtype=np.int64)
+    train_idx, val_idx = train_test_split(indices, test_size=0.1, random_state=42)
 
     # --- Configuration ---
     dropout_rate = getattr(args, "dropout_rate", 0.2)
@@ -235,24 +198,15 @@ def sift_train(args, img_rows, img_cols, X, y):
     optimizer = libraries.torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
     loss_fn = nn.CrossEntropyLoss()
 
-    # DataLoaders
-    # Create TensorDatasets from flattened arrays. Avoid unnecessary copies when possible.
-    train_tensor_x = libraries.torch.from_numpy(X_train.copy()).float()
-    val_tensor_x = libraries.torch.from_numpy(X_val.copy()).float()
-    train_ds = libraries.torch.utils.data.TensorDataset(
-        train_tensor_x,
-        libraries.torch.from_numpy(y_train.copy()).long()
-    )
-    val_ds = libraries.torch.utils.data.TensorDataset(
-        val_tensor_x,
-        libraries.torch.from_numpy(y_val.copy()).long()
-    )
-
-    # Tune DataLoader for GPU if available
+    # Create memmap-backed DataLoaders (no full-array copies)
     use_cuda = (device.type == "cuda")
-    dl_kwargs = dict(batch_size=args.batch_size, num_workers=4, pin_memory=use_cuda)
-    train_loader = libraries.torch.utils.data.DataLoader(train_ds, shuffle=True, **dl_kwargs)
-    val_loader = libraries.torch.utils.data.DataLoader(val_ds, shuffle=False, **dl_kwargs)
+    num_workers = getattr(args, "num_workers", None)
+    pin_memory = use_cuda  # pin_memory only useful when transferring to CUDA
+    train_loader, val_loader = make_sift_dataloaders(X, np.asarray(y), train_idx, val_idx,
+                                                    batch_size=getattr(args, "batch_size", 256),
+                                                    num_workers=num_workers,
+                                                    pin_memory=pin_memory,
+                                                    persistent_workers=True)
 
     # AMP scaler only needed on CUDA
     scaler = GradScaler() if use_cuda else None
@@ -262,7 +216,7 @@ def sift_train(args, img_rows, img_cols, X, y):
     best_state = None
 
 
-    print(f"Training on {len(X_train)} samples, validating on {len(X_val)}.")
+    print(f"Training on {len(train_idx)} samples, validating on {len(val_idx)}.")
 
     for epoch in range(args.epochs):
         model.train()

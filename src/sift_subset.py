@@ -85,8 +85,8 @@ def subsample_fvecs(input_file, output_file, k=100000, seed=42):
 
 # --- Main execution ---
 if __name__ == "__main__":
-    INPUT_FILE = '../Data/SIFT/sift_base.fvecs'
-    OUTPUT_FILE = '../Data/SIFT/sift_base_100k.fvecs'
+    INPUT_FILE = 'Data/SIFT/sift_base.fvecs'
+    OUTPUT_FILE = './Data/SIFT/sift_base_100k.fvecs'
     N_SUBSAMPLE = 100000
 
     subsample_fvecs(INPUT_FILE, OUTPUT_FILE, k=N_SUBSAMPLE)
