@@ -30,7 +30,6 @@ def main():
             exit()
 
     model, X, Q, X_flat_raw, Q_flat_raw, inverted = load_data(args)
-
     neural_lsh(args, model, inverted, X, Q, X_flat_raw, Q_flat_raw)
 
 if __name__ == "__main__":

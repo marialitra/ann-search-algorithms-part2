@@ -21,7 +21,7 @@ class MemmapSIFTDataset(libraries.torch.utils.data.Dataset):
     def __getitem__(self, idx):
         i = int(self.indices[idx])
 
-        # Read vector (may be memmap-backed view)
+        # Read vector
         arr = self.data[i]
 
         # Flatten if necessary

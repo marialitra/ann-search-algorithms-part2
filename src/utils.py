@@ -103,7 +103,7 @@ def load_data(args) -> Tuple[nn.Module, np.ndarray, np.ndarray, np.ndarray, np.n
     model_path = libraries.os.path.join(args.index, "model.pth")
     inverted_path = libraries.os.path.join(args.index, "inverted_file.npy")
 
-    model = load_model(model_path,  d_in, m, img_rows, img_cols)
+    model = load_model(model_path, d_in, m, img_rows, img_cols)
     return model, *load_inverted_file(args, inverted_path, img_rows, img_cols)
 
 def load_model(model_path: str, d_in: int, m: int, img_rows: int, img_cols: int) -> nn.Module:
@@ -112,6 +112,7 @@ def load_model(model_path: str, d_in: int, m: int, img_rows: int, img_cols: int)
     if libraries.os.path.exists(model_path):
         # Load the checkpoint first and decide which classifier to instantiate
         sd = libraries.torch.load(model_path, map_location="cpu")
+        
         # Handle common checkpoint wrappers where the state_dict is nested
         if isinstance(sd, dict):
             # Common keys used by training scripts
@@ -140,10 +141,10 @@ def load_model(model_path: str, d_in: int, m: int, img_rows: int, img_cols: int)
             first_w = sd[sorted(linear_keys)[0]]
             hidden_size = int(first_w.shape[0])
 
-            # number of linear layers == number of linear_keys
+            # Number of linear layers == number of linear_keys
             n_linears = len(linear_keys)
 
-            # conlibraries.struct an MLP with that many linear layers
+            # Construct an MLP with that many linear layers
             model = MLPClassifier(d_in=d_in, n_out=m, hidden_size=hidden_size, n_layers=n_linears, dropout=0.0)
             model.load_state_dict(sd)
             model.eval()
@@ -154,7 +155,7 @@ def load_model(model_path: str, d_in: int, m: int, img_rows: int, img_cols: int)
 
     return model
 
-def load_inverted_file(args, inverted_path: str, img_rows: int, img_cols: int) -> Tuple[np.ndarray, np.ndarray, Dict[int, List[int]]]:
+def load_inverted_file(args, inverted_path: str, img_rows: int, img_cols: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[int, List[int]]]:
 
     inverted = {}
     is_sift = args.type and args.type.lower().startswith("sift")

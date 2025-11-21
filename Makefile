@@ -97,7 +97,7 @@ siftSearch:
   -i nlsh_index_sift \
   -o output.txt \
   -type sift \
-  -N 5 -R 300.0 -T 90 -range TRUE
+  -N 5 -R 98.0 -T 90 -range false
 
 mnistSearch:
 	OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
@@ -107,7 +107,7 @@ mnistSearch:
   -i nlsh_index_mnist \
   -o output.txt \
   -type MNIST \
-  -N 4 -R -8.0 -T 500 -range false
+  -N 4 -R 300.0 -T 100 -range false
 
 
 # ==============================================================

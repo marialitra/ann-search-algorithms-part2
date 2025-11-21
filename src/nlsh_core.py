@@ -65,8 +65,10 @@ def neural_lsh(args, model: nn.Module, inverted: Dict[int, List[int]],  X: np.nd
             union_candidates = np.unique(np.concatenate(batch_candidates)) if len(batch_candidates) > 0 else np.array([], dtype=np.int64)
 
             # Precompute query norms for distance computations
-            Qb = Q_flat_all[q_slice]  # (b, d)
-            Qb_norm_sq = np.sum(Qb * Qb, axis=1)[:, None]
+            # Qb = Q_flat_all[q_slice]  # (b, d)
+            Qb = Q_flat_all[q_slice].astype(np.float64, copy=False)
+            # Qb_norm_sq = np.sum(Qb * Qb, axis=1)[:, None]
+            Qb_norm_sq = np.sum(Qb * Qb, axis=1, dtype=np.float64)[:, None]
 
             # If raw flattened vectors were preserved, prepare raw query norms
             Qb_raw = None
@@ -77,7 +79,8 @@ def neural_lsh(args, model: nn.Module, inverted: Dict[int, List[int]],  X: np.nd
 
             # Prepare arrays to hold top-N for each query in batch
             top_idx = np.full((b, args.N), -1, dtype=np.int64)
-            top_dist = np.full((b, args.N), np.inf, dtype=np.float32)
+            # top_dist = np.full((b, args.N), np.inf, dtype=np.float32)
+            top_dist = np.full((b, args.N), np.inf, dtype=np.float64)
 
             # Prepare per-batch containers for range neighbors (R-near)
             batch_range_neighbors = [list() for _ in range(b)] if range_enabled else None
@@ -88,12 +91,14 @@ def neural_lsh(args, model: nn.Module, inverted: Dict[int, List[int]],  X: np.nd
                 for xi in range(0, union_candidates.size, CAND_CHUNK):
                     chunk = union_candidates[xi:xi + CAND_CHUNK]
                     # Normalized vectors used for ranking
-                    Xc = X_flat[chunk]
-                    Xc_norm_sq = np.sum(Xc * Xc, axis=1)[None, :]
+                    # Xc = X_flat[chunk]
+                    Xc = X_flat[chunk].astype(np.float64, copy=False)
+                    # Xc_norm_sq = np.sum(Xc * Xc, axis=1)[None, :]
+                    Xc_norm_sq = np.sum(Xc * Xc, axis=1, dtype=np.float64)[None, :]
 
                     # Compute distances (b, chunk_size) in normalized space for ranking
                     prod = Qb @ Xc.T
-                    dist_sq = Qb_norm_sq - 2.0 * prod + Xc_norm_sq
+                    dist_sq = Qb_norm_sq - 2.0 * prod + Xc_norm_sq # float64 now
 
                     # If range search enabled, prefer raw-space distance checks when
                     # Raw flattened arrays are available (keeps R units consistent).
@@ -162,9 +167,14 @@ def neural_lsh(args, model: nn.Module, inverted: Dict[int, List[int]],  X: np.nd
 
                 # Compute raw-space approximate distances only for the final top-N (if raw arrays present)
                 if X_flat_raw is not None and Q_flat_raw is not None and neighbors.size > 0:
+                    # approx_dists = np.linalg.norm(
+                    #     X_flat_raw[neighbors] - Q_flat_raw[q_global_i], axis=1
+                    # )
                     approx_dists = np.linalg.norm(
-                        X_flat_raw[neighbors] - Q_flat_raw[q_global_i], axis=1
-                    )
+                        X_flat_raw[neighbors].astype(np.float64) - 
+                        Q_flat_raw[q_global_i].astype(np.float64),
+                        axis=1
+                    ).astype(np.float64)
                 else:
                     approx_dists = approx_dists_norm
 
@@ -179,11 +189,21 @@ def neural_lsh(args, model: nn.Module, inverted: Dict[int, List[int]],  X: np.nd
                 # ---------- True distances timing (raw-space) ----------
                 true_idx = true_neighbors_array[q_global_i]
                 if X_flat_raw is not None and Q_flat_raw is not None:
+                    # true_dists = np.linalg.norm(
+                    #     X_flat_raw[true_idx] - Q_flat_raw[q_global_i], axis=1)
                     true_dists = np.linalg.norm(
-                        X_flat_raw[true_idx] - Q_flat_raw[q_global_i], axis=1)
+                        X_flat_raw[true_idx].astype(np.float64) -
+                        Q_flat_raw[q_global_i].astype(np.float64),
+                        axis=1
+                    ).astype(np.float64)
                 else:
+                    # true_dists = np.linalg.norm(
+                    #     X_flat[true_idx] - Q_flat_all[q_global_i], axis=1)
                     true_dists = np.linalg.norm(
-                        X_flat[true_idx] - Q_flat_all[q_global_i], axis=1)
+                        X_flat_raw[true_idx].astype(np.float64) -
+                        Q_flat_raw[q_global_i].astype(np.float64),
+                        axis=1
+                    ).astype(np.float64)
 
                 # ---------- Approximation factor ----------
                 if true_dists.size > 0:
@@ -208,8 +228,8 @@ def neural_lsh(args, model: nn.Module, inverted: Dict[int, List[int]],  X: np.nd
                 block = [f"Query: {q_global_i}"]
                 for k in range(min(args.N, neighbors.size)):
                     block.append(f"Nearest neighbor-{k+1}: {int(neighbors[k])}")
-                    block.append(f"distanceApproximate: {float(approx_dists[k]):.4f}")
-                    block.append(f"distanceTrue: {float(true_dists[k]):.4f}")
+                    block.append(f"distanceApproximate: {float(approx_dists[k]):.8f}")
+                    block.append(f"distanceTrue: {float(true_dists[k]):.8f}")
 
                 if range_enabled and r_neighbors.size > 0:
                     block.append("R-near neighbors:")
@@ -270,19 +290,20 @@ def compute_metrics_produce_output(args, results: List[str], all_lsh_neighbors: 
     else:
         recall_final = 0.0
 
-        
+    output_path = libraries.os.path.abspath(args.output)
+    
     # ---- Write output file ----
-    with open(args.output, "w") as f:
+    with open(output_path, "w") as f:
         f.write("Neural LSH\n")
 
         for blk in results:
             f.write(blk + "\n\n")
 
-        f.write(f"Average AF: {avg_AF:.4f}\n")
-        f.write(f"Recall@{args.N}: {recall_final:.4f}\n")
-        f.write(f"QPS: {QPS:.4f}\n")
-        f.write(f"tApproximateAverage: {tApprox_avg:.6f}\n")
-        f.write(f"tTrueAverage: {tTrue_avg:.6f}\n")
+        f.write(f"Average AF: {avg_AF:.8f}\n")
+        f.write(f"Recall@{args.N}: {recall_final:.8f}\n")
+        f.write(f"QPS: {QPS:.8f}\n")
+        f.write(f"tApproximateAverage: {tApprox_avg:.8f}\n")
+        f.write(f"tTrueAverage: {tTrue_avg:.8f}\n")
 
     print(f"Wrote output file to {args.output}")
     return

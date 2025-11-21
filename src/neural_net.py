@@ -10,7 +10,7 @@ class MLPClassifier(nn.Module):
         layers.append(nn.ReLU())
         layers.append(nn.Dropout(dropout))
 
-        if n_layers > 0  & n_layers - 2 >0 :
+        if n_layers > 0  and n_layers - 2 > 0 :
             for _ in range(n_layers - 2):
                 layers.append(nn.Linear(hidden_size, hidden_size))
                 layers.append(nn.ReLU())
@@ -24,7 +24,7 @@ class MLPClassifier(nn.Module):
 
 # --- CNN Classifier for Image Data ---
 class CNNClassifier(nn.Module):
-    def __init__(self, img_rows, img_cols, n_out, dropout_rate=0.25): 
+    def __init__(self, img_rows, img_cols, n_out, n_layers, dropout_rate=0.25): 
         super().__init__()
 
         # Layer 1: Conv -> ReLU -> Pool -> Dropout
@@ -36,10 +36,26 @@ class CNNClassifier(nn.Module):
             nn.Dropout(dropout_rate)
         )
         
+        layers = []
+        in_ch = 32  # MNIST grayscale input
+        out_ch = 64
+
+        # Build convolutional stack
+        if n_layers > 0  and n_layers - 3 > 0 :
+            for i in range(n_layers):
+                layers.append(nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=3, padding=1))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(dropout_rate))
+                in_ch = out_ch
+                out_ch *= 2  # Double channels each layer
+
+        self.hidden = nn.Sequential(*layers)
+
+
         # Layer 2: Conv -> ReLU -> Pool -> Dropout
         self.conv2 = nn.Sequential(
             # Input: 32 feature maps, Output: 64 feature maps
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1), 
+            nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=3, padding=1), 
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2), # Reduces H/W by half (14x14 -> 7x7)
             nn.Dropout(dropout_rate)
@@ -47,10 +63,10 @@ class CNNClassifier(nn.Module):
         
         # Calculate the size of the feature vector after convolution/pooling
         # If input is 28x28: After first pool: 14x14. After second pool: 7x7. 
-        # Output channels from conv2 is 64.
+        # Output channels from conv2 is out_ch.
         final_h = img_rows // 4 
         final_w = img_cols // 4
-        fc_input_size = final_h * final_w * 64 
+        fc_input_size = final_h * final_w * out_ch
         
         # Debuggine Reasons
         # print(f"CNN Feature Map size before Flatten: 64x{final_h}x{final_w}")
@@ -64,77 +80,9 @@ class CNNClassifier(nn.Module):
 
     def forward(self, x): 
         x = self.conv1(x)
+        x = self.hidden(x)
         x = self.conv2(x)
         return self.classifier(x)
-
-
-# class CNNClassifier(nn.Module):
-#     def __init__(self, img_rows, img_cols, n_out,
-#                  conv_channels, dropout_rate=0.25):
-#         """
-#         conv_channels: list of ints, e.g. [32, 64, 128]
-#         The length of this list determines the number of conv layers.
-#         """
-#         super().__init__()
-
-#         layers = []
-#         in_ch = 1  # MNIST grayscale input
-
-#         # Build convolutional stack
-#         for out_ch in conv_channels:
-#             layers.append(nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1))
-#             layers.append(nn.ReLU())
-#             layers.append(nn.MaxPool2d(2))      # halves H and W
-#             layers.append(nn.Dropout(dropout_rate))
-#             in_ch = out_ch
-
-#         self.conv = nn.Sequential(*layers)
-
-#         # Compute flattened size dynamically
-#         with libraries.torch.no_grad():
-#             dummy = libraries.torch.zeros(1, 1, img_rows, img_cols)
-#             conv_out = self.conv(dummy)
-#             flat_dim = conv_out.numel()
-
-#         # Classifier head
-#         self.classifier = nn.Sequential(
-#             nn.Flatten(),
-#             nn.Linear(flat_dim, n_out)
-#         )
-
-#     def forward(self, x):
-#         x = self.conv(x)
-#         return self.classifier(x)
-
-
-# model = CNNClassifier(
-#     img_rows,
-#     img_cols,
-#     n_out=args.m,
-#     conv_channels=args.conv_channels,   # <-- user controls layers & channels
-#     dropout_rate=args.dropout_rate
-# )
-
-# --conv_layers 3
-# --conv_channels 32 64 128
-
-# This produces a CNN with:
-
-# Conv1: 1 → 32
-
-# Conv2: 32 → 64
-
-# Conv3: 64 → 128
-
-# Conv4: 128 → 256
-
-# Each followed by:
-
-# ReLU
-
-# MaxPool2d
-
-# Dropout
 
 
 def mnist_train(args, img_rows, img_cols, X, y):
@@ -166,7 +114,7 @@ def mnist_train(args, img_rows, img_cols, X, y):
     val_loader = libraries.torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
 
     # Instantiate model and optimizer
-    model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=args.m,
+    model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=args.m, n_layers=args.layers,
                           dropout_rate=dropout_rate).to(device)
     optimizer = libraries.torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=weight_decay)
     loss_fn = nn.CrossEntropyLoss()

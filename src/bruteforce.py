@@ -52,8 +52,8 @@ def find_and_save_true_neighbors(X_flat: np.ndarray, Q_flat: np.ndarray, N: int,
     Q_arr = Q_flat.astype(np.float32, copy=False)
 
     # Process in chunks to save memory
-    X_CHUNK = 10000  # number of dataset vectors per chunk
-    Q_BATCH = 128    # number of queries per batch
+    X_CHUNK = 10000  # Number of dataset vectors per chunk
+    Q_BATCH = 128    # Number of queries per batch
 
     # Output arrays: indices and squared distances
     top_idx = np.empty((nq, N), dtype=np.int64)

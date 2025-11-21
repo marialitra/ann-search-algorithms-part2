@@ -82,9 +82,6 @@ def main():
     # ---- Call kahip partitioner ----
     print("Start of KaHIP")
 
-    # calculcate time it takes
-    # clock_start = libraries.time.time()
-
     edgecut, blocks = libraries.kahip.kaffpa(vwgt, xadj, adjwgt, adjncy, args.m, args.imbalance, True, args.seed, args.kahip_mode)
     
     # Debugging Reasons
