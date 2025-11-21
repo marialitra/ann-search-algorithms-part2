@@ -23,14 +23,14 @@ SEED_SIFT := 42
 INPUT_FILE := ./Data/MNIST/train-images.idx3-ubyte
 INDEX_PATH:= nlsh_index_mnist
 DATASET_TYPE := MNIST
-KNN_NEIGHBORS := 30
-NUM_BLOCKS := 10000
+KNN_NEIGHBORS := 5
+NUM_BLOCKS := 2000
 IMBALANCE := 0.1
 KAHIP_MODE := 0
-NUM_LAYERS := 3
+NUM_LAYERS := 4
 NUM_NEURONS := 512
 EPOCHS := 3
-BATCH_SIZE := 2048
+BATCH_SIZE := 256
 LEARNING_RATE := 0.001
 SEED := 42
 
@@ -97,7 +97,7 @@ siftSearch:
   -i nlsh_index_sift \
   -o output.txt \
   -type sift \
-  -N 5 -R 98.0 -T 90 -range false
+  -N $(KNN_NEIGHBORS_SIFT) -R 98.0 -T 90 -range false
 
 mnistSearch:
 	OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
@@ -107,7 +107,7 @@ mnistSearch:
   -i nlsh_index_mnist \
   -o output.txt \
   -type MNIST \
-  -N 4 -R 300.0 -T 100 -range false
+  -N $(KNN_NEIGHBORS) -R 300.0 -T 50 -range false
 
 
 # ==============================================================

@@ -85,7 +85,7 @@ def main():
     edgecut, blocks = libraries.kahip.kaffpa(vwgt, xadj, adjwgt, adjncy, args.m, args.imbalance, True, args.seed, args.kahip_mode)
     
     # Debugging Reasons
-    # print(f"Partitioned graph into {args.m} blocks with edgecut {edgecut}.")
+    print(f"Partitioned graph into {args.m} blocks with edgecut {edgecut}.")
 
     X = data_vectors
     y = np.array(blocks)
@@ -99,8 +99,9 @@ def main():
 
     libraries.os.makedirs(args.index, exist_ok=True)
 
-    # Save the model and the inverted index file
-    save_builds_output(model, args.index, X.copy(), y.copy(), img_rows, img_cols)
+    # Save the model and the inverted index file. Avoid an extra in-memory copy
+    # of the full dataset (X.copy()) which can spike memory and cause OOM.
+    save_builds_output(model, args.index, X, y, img_rows, img_cols)
 
 if __name__ == "__main__":
     main()

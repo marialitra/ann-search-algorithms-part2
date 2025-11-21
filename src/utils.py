@@ -126,8 +126,20 @@ def load_model(model_path: str, d_in: int, m: int, img_rows: int, img_cols: int)
         sd_keys = list(sd.keys()) if isinstance(sd, dict) else []
 
         if any(k.startswith("conv1") or k.startswith("conv1.0") for k in sd_keys):
-            # CNN checkpoint
-            model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=m)
+            # CNN checkpoint: infer number of conv layers
+            n_layers = 1 # count Final fully connected layer for classification
+            for k in sd_keys: # look for conv layer weights
+                v = sd[k]
+                try :
+                    shape = v.shape
+                except Exception:
+                    continue
+                if len(shape) == 4:  # Conv layer weights are 4D tensors
+                        n_layers += 1
+
+            # print conv hiden layers and final out channels
+            print(f"Loading CNN model with {n_layers} layers")
+            model = CNNClassifier(img_rows=img_rows, img_cols=img_cols, n_out=m, n_layers=n_layers)
             model.load_state_dict(sd)
             model.eval()
         elif any(k.startswith("net.") for k in sd_keys):

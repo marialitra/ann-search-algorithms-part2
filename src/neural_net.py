@@ -35,39 +35,39 @@ class CNNClassifier(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2), # Reduces H/W by half (28x28 -> 14x14)
             nn.Dropout(dropout_rate)
         )
-        
+        # Build optional hidden conv blocks. We interpret `n_layers` such that
+        # conv1 and conv2 are included in the count; the number of extra
+        # convolutional blocks between them is `max(0, n_layers - 2)`.
+        in_ch = 32
+        out_ch = int(in_ch * 1.25)
         layers = []
-        in_ch = 32  # MNIST grayscale input
-        out_ch = 64
+        num_extra = max(0, n_layers - 3)
+        for _ in range(num_extra):
+            layers.append(nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=3, padding=1))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            in_ch = out_ch
+            out_ch = min(int(out_ch * 1.2), 1024)
 
-        # Build convolutional stack
-        if n_layers > 0  and n_layers - 3 > 0 :
-            for i in range(n_layers):
-                layers.append(nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=3, padding=1))
-                layers.append(nn.ReLU())
-                layers.append(nn.Dropout(dropout_rate))
-                in_ch = out_ch
-                out_ch *= 2  # Double channels each layer
-
+        print(f"CNN hidden conv layers: {num_extra}, final channels before conv2: {in_ch}")
         self.hidden = nn.Sequential(*layers)
 
-
-        # Layer 2: Conv -> ReLU -> Pool -> Dropout
+        # conv2 consumes the channels produced by the hidden stack and performs
+        # another pooling to reduce spatial dims to 7x7 for 28x28 input.
         self.conv2 = nn.Sequential(
-            # Input: 32 feature maps, Output: 64 feature maps
-            nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=3, padding=1), 
+            nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2), # Reduces H/W by half (14x14 -> 7x7)
-            nn.Dropout(dropout_rate)
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 14x14 -> 7x7
+            nn.Dropout(dropout_rate),
         )
-        
+    
+        print(f"CNN conv2 output channels: {out_ch}")
+
         # Calculate the size of the feature vector after convolution/pooling
-        # If input is 28x28: After first pool: 14x14. After second pool: 7x7. 
-        # Output channels from conv2 is out_ch.
-        final_h = img_rows // 4 
+        final_h = img_rows // 4
         final_w = img_cols // 4
         fc_input_size = final_h * final_w * out_ch
-        
+
         # Debuggine Reasons
         # print(f"CNN Feature Map size before Flatten: 64x{final_h}x{final_w}")
         # print(f"Final Linear layer input size: {fc_input_size}")
