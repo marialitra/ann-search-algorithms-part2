@@ -1,6 +1,5 @@
 import libraries
-from libraries import nn, np, train_test_split, GradScaler, autocast
-from dataset_utils import make_sift_dataloaders
+from libraries import nn, np, train_test_split, GradScaler, autocast, make_sift_dataloaders
 
 # Define MLP Classifier for SIFT data
 class MLPClassifier(nn.Module):
@@ -10,10 +9,13 @@ class MLPClassifier(nn.Module):
         layers.append(nn.Linear(d_in, hidden_size))
         layers.append(nn.ReLU())
         layers.append(nn.Dropout(dropout))
-        for _ in range(n_layers - 2):
-            layers.append(nn.Linear(hidden_size, hidden_size))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
+
+        if n_layers > 0  & n_layers - 2 >0 :
+            for _ in range(n_layers - 2):
+                layers.append(nn.Linear(hidden_size, hidden_size))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(dropout))
+
         layers.append(nn.Linear(hidden_size, n_out))
         self.net = nn.Sequential(*layers)
 
@@ -50,6 +52,7 @@ class CNNClassifier(nn.Module):
         final_w = img_cols // 4
         fc_input_size = final_h * final_w * 64 
         
+        # Debuggine Reasons
         # print(f"CNN Feature Map size before Flatten: 64x{final_h}x{final_w}")
         # print(f"Final Linear layer input size: {fc_input_size}")
         
@@ -63,6 +66,76 @@ class CNNClassifier(nn.Module):
         x = self.conv1(x)
         x = self.conv2(x)
         return self.classifier(x)
+
+
+# class CNNClassifier(nn.Module):
+#     def __init__(self, img_rows, img_cols, n_out,
+#                  conv_channels, dropout_rate=0.25):
+#         """
+#         conv_channels: list of ints, e.g. [32, 64, 128]
+#         The length of this list determines the number of conv layers.
+#         """
+#         super().__init__()
+
+#         layers = []
+#         in_ch = 1  # MNIST grayscale input
+
+#         # Build convolutional stack
+#         for out_ch in conv_channels:
+#             layers.append(nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1))
+#             layers.append(nn.ReLU())
+#             layers.append(nn.MaxPool2d(2))      # halves H and W
+#             layers.append(nn.Dropout(dropout_rate))
+#             in_ch = out_ch
+
+#         self.conv = nn.Sequential(*layers)
+
+#         # Compute flattened size dynamically
+#         with libraries.torch.no_grad():
+#             dummy = libraries.torch.zeros(1, 1, img_rows, img_cols)
+#             conv_out = self.conv(dummy)
+#             flat_dim = conv_out.numel()
+
+#         # Classifier head
+#         self.classifier = nn.Sequential(
+#             nn.Flatten(),
+#             nn.Linear(flat_dim, n_out)
+#         )
+
+#     def forward(self, x):
+#         x = self.conv(x)
+#         return self.classifier(x)
+
+
+# model = CNNClassifier(
+#     img_rows,
+#     img_cols,
+#     n_out=args.m,
+#     conv_channels=args.conv_channels,   # <-- user controls layers & channels
+#     dropout_rate=args.dropout_rate
+# )
+
+# --conv_layers 3
+# --conv_channels 32 64 128
+
+# This produces a CNN with:
+
+# Conv1: 1 → 32
+
+# Conv2: 32 → 64
+
+# Conv3: 64 → 128
+
+# Conv4: 128 → 256
+
+# Each followed by:
+
+# ReLU
+
+# MaxPool2d
+
+# Dropout
+
 
 def mnist_train(args, img_rows, img_cols, X, y):
     """
@@ -201,17 +274,18 @@ def sift_train(args, img_rows, img_cols, X, y):
             optimizer.zero_grad()
 
             if use_cuda:
-                # enable AMP on CUDA devices
+                # Enable AMP on CUDA devices
                 with autocast(enabled=True):
                     logits = model(xb)
                     loss = loss_fn(logits, yb)
-                # backward with scaler if available
+
+                # Backward with scaler if available
                 if scaler is not None:
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
                 else:
-                    # fallback if scaler not available
+                    # Fallback if scaler not available
                     loss.backward()
                     optimizer.step()
             else:

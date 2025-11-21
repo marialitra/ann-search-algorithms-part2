@@ -2,13 +2,13 @@ import libraries
 
 def build_executable():
     """
-    Runs 'make search' to compile the executable.
+        Runs 'make search' to compile the executable.
     """
     if libraries.os.path.exists("./Ivfflat/search"):
         print("--- Executable './Ivfflat/search' found. Skipping build. ---")
         return True
 
-    print("--- 1. Building executable (running 'make search')... ---")
+    print("--- Building executable (running 'make search')... ---")
     try:
         build_process = libraries.subprocess.run(["make", "search"], capture_output=True, text=True, check=True)
         print("Build complete: './search' is ready.")
@@ -24,15 +24,16 @@ def build_executable():
 
 def run_ivfflat(command_list):
     """
-    Runs the ./search executable with optimized parameters for speed.
+        Runs the ./search executable with optimized parameters for speed.
     """
 
-    # --- 2. OPTIMIZATION: Auto-detect CPU cores ---
+    # Auto-detect CPU cores
     # Use all available cores for maximum parallelism
     num_cores = str(libraries.multiprocessing.cpu_count())
     print(f"Detected {num_cores} CPU cores. Setting OMP_NUM_THREADS.")
 
     run_env = libraries.os.environ.copy()
+    
     # Setting threads to match core count usually gives best performance
     run_env["OMP_NUM_THREADS"] = num_cores
     run_env["OMP_NESTED"] = "TRUE"

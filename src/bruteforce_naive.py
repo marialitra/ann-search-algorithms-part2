@@ -44,20 +44,20 @@ def find_and_save_true_neighbors_naive(X_flat: np.ndarray, Q_flat: np.ndarray, N
     # Naive triple-loop: for each query, compute distance to every X using inner-loop over dimensions
     for qi in range(nq):
         qv = Q[qi]
-        dists = []  # list of (dist, idx)
+        dists = []
         for xi in range(n):
             xv = X[xi]
             s = 0.0
-            # inner loop over dimensions (explicit Python loop)
+
             for k in range(dimq):
                 diff = qv[k] - xv[k]
                 s += diff * diff
             dists.append((s, xi))
 
-        # sort by distance (Python Timsort) and take top-N
+        # Sort by distance (Python Timsort) and take top-N
         dists.sort(key=lambda t: t[0])
         topN = [idx for (_, idx) in dists[:N]]
-        # store
+
         for j in range(N):
             true_idx[qi, j] = int(topN[j]) if j < len(topN) else -1
 
@@ -112,7 +112,7 @@ def load_or_compute_true_neighbors_naive(X: np.ndarray, Q: np.ndarray, datasetNa
 
 
 def calculate_recall_naive(true_neighbors_array: np.ndarray, all_lsh_neighbors: list, N: int) -> float:
-    # simple recall as in optimized module
+    # Simple recall as in optimized module
     total_queries = true_neighbors_array.shape[0]
     total_recall = 0.0
     for qi in range(total_queries):

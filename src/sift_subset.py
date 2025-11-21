@@ -3,13 +3,13 @@ from libraries import np
 
 def subsample_fvecs(input_file, output_file, k=100000, seed=42):
     """
-    Creates a new .fvecs file by randomly subsampling k vectors
-    from an input .fvecs file in a memory-efficient way.
-    Args:
-        input_file (str): Path to the source .fvecs file (e.g., 'sift_base.fvecs').
-        output_file (str): Path to write the new subsampled file.
-        k (int): The number of random vectors to subsample.
-        seed (int): Random seed for reproducibility.
+        Creates a new .fvecs file by randomly subsampling k vectors
+        from an input .fvecs file in a memory-efficient way.
+        Args:
+            input_file (str): Path to the source .fvecs file (e.g., 'sift_base.fvecs').
+            output_file (str): Path to write the new subsampled file.
+            k (int): The number of random vectors to subsample.
+            seed (int): Random seed for reproducibility.
     """
 
     if not libraries.os.path.exists(input_file):
@@ -47,12 +47,13 @@ def subsample_fvecs(input_file, output_file, k=100000, seed=42):
 
             # --- 2. Generate random indices ---
             np.random.seed(seed)
+            
             # Get k unique random indices from the range [0, n)
             indices = np.random.permutation(n)[:k]
 
             # --- 3. Sort indices for efficient reading ---
             # Sorting allows us to read the file sequentially,
-            # which is much faster than random disk seeks.
+            # Which is much faster than random disk seeks.
             indices.sort()
 
             print(f"Generated {k} random indices. Writing to {output_file}...")

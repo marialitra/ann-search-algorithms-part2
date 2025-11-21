@@ -1,10 +1,8 @@
 import libraries
-from libraries import Tuple, Dict, List, np, nn, counter, load_sift_vectors, load_idx_images, mnist_train, sift_train, parse_neighbor_file, build_csr_from_neighbors, save_output, _slug
-from runSearchExe import build_executable, run_ivfflat
+from libraries import Tuple, Dict, List, np, nn, counter, load_sift_vectors, load_idx_images, mnist_train, sift_train, parse_neighbor_file, build_csr_from_neighbors, save_builds_output, _slug, build_executable, run_ivfflat
 
 def main():
     p = libraries.argparse.ArgumentParser(description="Build adjacency matrix (CSR) from neighbor TXT files.")
-    # p.add_argument("input", type=str, help="path to neighbor TXT file")
     p.add_argument("-d", "--dataset", required=True, type=str, help="Path to input file")
     p.add_argument("-i", "--index", required=True, type=str, help="Path to index file")
     p.add_argument("--type", required=True, type=str, help="Dataset type (MNIST or SIFT)")
@@ -34,7 +32,6 @@ def main():
         kclusters = str(root * 2 )
         n_probe = str( int(kclusters)//400  if int(kclusters)//400 > 1 else 2 )
     elif dataset_type and dataset_type.lower().startswith('mnist'):
-        # default: IDX images (MNIST)
         data_vectors, num_images, img_rows, img_cols = load_idx_images(args.dataset)
         root = int( np.sqrt(num_images) )
         dataset_type = "mnist"
@@ -44,7 +41,7 @@ def main():
         print("Not acceptable dataset type")
         exit()
 
-    # ---- Build or load the kNN graph using IVFFLAT ----
+    # Build or load the kNN graph using IVFFLAT
     output_dir = "knngraphs"
     libraries.os.makedirs(output_dir, exist_ok=True)
     
@@ -84,15 +81,17 @@ def main():
 
     # ---- Call kahip partitioner ----
     print("Start of KaHIP")
-    # calculcate time it takes
-    clock_start = libraries.time.time()
-    edgecut, blocks = libraries.kahip.kaffpa(vwgt, xadj, adjwgt, adjncy, args.m, args.imbalance, True, args.seed, args.kahip_mode)
-    clock_end = libraries.time.time()
-    print(f"Partitioned graph into {args.m} blocks with edgecut {edgecut}. Time taken: {clock_end - clock_start} seconds.")
-    # print(blocks)
 
-    X = data_vectors    # shape (n, 1, rows, cols)
-    y = np.array(blocks)  # labels from KaHIP
+    # calculcate time it takes
+    # clock_start = libraries.time.time()
+
+    edgecut, blocks = libraries.kahip.kaffpa(vwgt, xadj, adjwgt, adjncy, args.m, args.imbalance, True, args.seed, args.kahip_mode)
+    
+    # Debugging Reasons
+    # print(f"Partitioned graph into {args.m} blocks with edgecut {edgecut}.")
+
+    X = data_vectors
+    y = np.array(blocks)
 
     # ---- Train the model based on dataset type ----
     if dataset_type and dataset_type.lower().startswith('sift'):
@@ -104,7 +103,7 @@ def main():
     libraries.os.makedirs(args.index, exist_ok=True)
 
     # Save the model and the inverted index file
-    save_output(model, args.index, X.copy(), y.copy(), img_rows, img_cols)
+    save_builds_output(model, args.index, X.copy(), y.copy(), img_rows, img_cols)
 
 if __name__ == "__main__":
     main()

@@ -8,13 +8,10 @@ def parse_neighbor_file(path: str) -> Tuple[Dict[int, List[int]], int]:
     """
 
     neighbors: Dict[int, List[int]] = {}
-
-    # regex helpers
     q_re = libraries.re.compile(r"^Query:\s*(\d+)")
     nn_re = libraries.re.compile(r"^Nearest neighbor-\d+:\s*(\d+)")
 
     current_q = None
-    # temporary index to align distances
     with open(path, "r", encoding="utf-8") as fh:
         for raw in fh:
             line = raw.strip()
@@ -52,6 +49,7 @@ def load_idx_images(filepath: str) -> Tuple[np.ndarray, int, int, int]:
 
     with open(filepath, 'rb') as f:
         header = f.read(16)
+
         # Unpack the header: Magic Number, Num Images, Rows, Cols
         magic, num_images, num_rows, num_cols = libraries.struct.unpack('>IIII', header)
         
@@ -79,7 +77,6 @@ def load_idx_images(filepath: str) -> Tuple[np.ndarray, int, int, int]:
     print("Successfully extracted vectors.")
     return data_vectors, num_images, num_rows, num_cols
 
-
 def read_fvecs(path: str) -> np.ndarray:
     """
         Read .fvecs file (each vector stored as: int32 dim, float32 dim values).
@@ -92,7 +89,7 @@ def read_fvecs(path: str) -> np.ndarray:
             if not hdr:
                 break
             d = libraries.struct.unpack('i', hdr)[0]
-            bytes_needed = 4 * d # read d float32 values
+            bytes_needed = 4 * d
             buf = fh.read(bytes_needed)
             if len(buf) != bytes_needed:
                 raise EOFError(f"Unexpected EOF while reading {path}")
@@ -102,7 +99,7 @@ def read_fvecs(path: str) -> np.ndarray:
         return np.zeros((0, 0), dtype=np.float32)
     return np.vstack(vecs)
 
-def load_sift_vectors(filepath: str, dtype=np.float32) -> tuple[np.memmap, int, int, int]:
+def load_sift_vectors(filepath: str, dtype=np.float32) -> tuple[np.ndarray, int, int, int]:
     """
         Load SIFT vectors from common binary formats (.fvecs, .bvecs) and return
         a 4D tensor shaped (n, 1, 1, dim) to be compatible with the rest of the
@@ -126,7 +123,7 @@ def load_sift_vectors(filepath: str, dtype=np.float32) -> tuple[np.memmap, int, 
             mat = np.loadtxt(filepath)
 
     n, dim = mat.shape
-    item_size = 4 * (dim + 1)  # each vector = int32 + dim*float32
+    item_size = 4 * (dim + 1)
     data_vectors = mat.reshape(n, 1, 1, dim)
     file_size = libraries.os.path.getsize(filepath)
     n_vectors = file_size // item_size
