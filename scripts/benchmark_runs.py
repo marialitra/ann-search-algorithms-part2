@@ -53,7 +53,7 @@ LAYERS_LIST = [2, 3, 5, 6]
 NODES_LIST = [64, 128, 256]
 EPOCHS_LIST = [1, 3, 5, 10]
 BATCH_LIST = [1024, 2048, 4096]
-T_LIST = [2, 50, 100, 250, 500]
+T_LIST = [2, 50, 90, 100]
 
 # Helper: slug for knngraph filename
 def slug(s: str) -> str:
@@ -63,8 +63,13 @@ def slug(s: str) -> str:
     s = s.strip('_')
     return s or 'unknown'
 
-def knngraph_path(dataset: str, knn: int) -> Path:
-    name = f"knngraph_{slug(dataset)}_N{knn}.txt"
+def knngraph_path(dataset: str, knn: int,blocks: int,imbalance: int,kahip_mode: int,layers: int,nodes: int,epochs: int,batch_size: int) -> Path:
+    if imbalance == 0.1:
+        name = f"knngraph_{slug(dataset)}_N{knn}_B{blocks}_I0_1_K_{kahip_mode}_L_{layers}_NOD_{nodes}_E_{epochs}_BS_{batch_size}.txt"
+    if imbalance == 0.03:
+        name = f"knngraph_{slug(dataset)}_N{knn}_B{blocks}_I0_03_K_{kahip_mode}_L_{layers}_NOD_{nodes}_E_{epochs}_BS_{batch_size}.txt"
+    if imbalance == 0.15:
+        name = f"knngraph_{slug(dataset)}_N{knn}_B{blocks}_I0_15_K_{kahip_mode}_L_{layers}_NOD_{nodes}_E_{epochs}_BS_{batch_size}.txt"
     return KNNS_DIR / name
 
 # True neighbors cache paths (metadata path pattern)
@@ -72,7 +77,47 @@ def true_neighbors_meta_path(dataset: str, query: str, N: int) -> Path:
     fname = f"true_neighbors_{slug(dataset)}_{slug(query)}_N{int(N)}.meta.json"
     return TRUE_NEIGH_DIR / fname
 
-# Run command wrapper
+# # Run command wrapper
+# def run_cmd(cmd, env=None, cwd=ROOT, timeout=None):
+#     start = time.perf_counter()
+#     process = subprocess.Popen(
+#         cmd,
+#         cwd=cwd,
+#         env=env,
+#         stdout=subprocess.PIPE,
+#         stderr=subprocess.PIPE,
+#         text=True,
+#         bufsize=1  # line-buffered
+#     )
+
+#     stdout_log = []
+#     stderr_log = []
+
+#     try:
+#         # Read stdout/stderr line-by-line as they come
+#         for stream, collector in [
+#             (process.stdout, stdout_log),
+#         ]:
+#             for line in iter(stream.readline, ''):
+#                 print(line, end='')       # <-- LIVE output to your terminal
+#                 collector.append(line)
+
+#         # Wait for process to exit and capture remaining stderr
+#         stderr_output = process.stderr.read()
+#         if stderr_output:
+#             print(stderr_output, end='')  # show errors live
+#             stderr_log.append(stderr_output)
+
+#         rc = process.wait(timeout=timeout)
+#         end = time.perf_counter()
+
+#         return rc, ''.join(stdout_log), ''.join(stderr_log), end - start
+
+#     except subprocess.TimeoutExpired:
+#         process.kill()
+#         return 124, ''.join(stdout_log), ''.join(stderr_log), time.perf_counter() - start
+
+
 def run_cmd(cmd, env=None, cwd=ROOT, timeout=None):
     start = time.perf_counter()
     try:
@@ -81,6 +126,8 @@ def run_cmd(cmd, env=None, cwd=ROOT, timeout=None):
         return r.returncode, r.stdout, r.stderr, end - start
     except subprocess.TimeoutExpired:
         return 124, '', 'timeout', time.perf_counter() - start
+
+
 
 # Parse metrics from output.txt written by nlsh_search.py
 def parse_search_output(output_file: Path):
@@ -158,7 +205,7 @@ def main():
                 'imbalance': 0.1,
                 'kahip_mode': 0,
                 'layers': 3,
-                'nodes': 256,
+                'nodes': 128,
                 'epochs': 3,
                 'batch_size': 1024
             }
@@ -193,7 +240,7 @@ def main():
                          '--lr', str(DEFAULTS.get('lr', 0.001)),
                          '--seed', str(DEFAULTS.get('seed', 42))]
 
-            knnpath = knngraph_path(DEFAULTS['dataset'], knn)
+            knnpath = knngraph_path(DEFAULTS['dataset'], knn,blocks,imbalance,kahip_mode,layers,nodes,epochs,batch_size)
             KNNS_DIR.mkdir(parents=True, exist_ok=True)
 
             build_time_with = None
@@ -201,11 +248,23 @@ def main():
 
             if args.dry:
                 print('DRY RUN build cmd:', ' '.join(build_cmd))
-            else:
-                # Force Ivfflat run by removing knngraph
+                # Force Ivfflat run by removing knngraph (ONLY WHEN USING THE DEFAULTS THIS WILL HAPPEN)
                 if knnpath.exists():
                     try:
-                        knnpath.unlink()
+                        # knnpath.unlink() 
+                        print('HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE')
+                        continue   
+                    except Exception:
+                        pass
+                else:
+                    print('HEEEEEEEEEEEEELLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL')
+                
+            else:
+                # Force Ivfflat run by removing knngraph (ONLY WHEN USING THE DEFAULTS THIS WILL HAPPEN)
+                if knnpath.exists():
+                    try:
+                        # knnpath.unlink() 
+                        continue   
                     except Exception:
                         pass
 
