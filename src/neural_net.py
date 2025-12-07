@@ -37,7 +37,7 @@ class CNNClassifier(nn.Module):
         )
         # Build optional hidden conv blocks. We interpret `n_layers` such that
         # conv1 and conv2 are included in the count; the number of extra
-        # convolutional blocks between them is `max(0, n_layers - 2)`.
+        # convolutional blocks between them is `max(0, n_layers - 3)`.
         in_ch = 32
         out_ch = int(in_ch * 1.25)
         layers = []

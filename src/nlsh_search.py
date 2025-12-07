@@ -1,5 +1,5 @@
 import libraries
-from libraries import load_data, neural_lsh
+from libraries import load_data, neural_lsh, validate_args
 
 def main():
     p = libraries.argparse.ArgumentParser(description="Neural LSH search phase.")
@@ -13,6 +13,7 @@ def main():
     p.add_argument("-T", type=int, default=5, help="Number of bins to probe (multi-probe)")
     p.add_argument("-range", type=str, default="true", help="Range search flag")
     args = p.parse_args()
+    validate_args(args)
     
     is_mnist = args.type and args.type.lower().startswith("mnist")
     is_sift = args.type and args.type.lower().startswith("sift")

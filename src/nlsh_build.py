@@ -1,5 +1,5 @@
 import libraries
-from libraries import Tuple, Dict, List, np, nn, counter, load_sift_vectors, load_idx_images, mnist_train, sift_train, parse_neighbor_file, build_csr_from_neighbors, save_builds_output, _slug, build_executable, run_ivfflat
+from libraries import Tuple, Dict, List, np, nn, counter, load_sift_vectors, load_idx_images, mnist_train, sift_train, parse_neighbor_file, build_csr_from_neighbors, save_builds_output, _slug, build_executable, run_ivfflat, validate_args
 
 def main():
     p = libraries.argparse.ArgumentParser(description="Build adjacency matrix (CSR) from neighbor TXT files.")
@@ -17,7 +17,8 @@ def main():
     p.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     p.add_argument("--seed", type=int, default=1, help="Seed number for reproducibility")
     args = p.parse_args()
-    
+    validate_args(args)
+
     if not libraries.os.path.exists(args.dataset):
         raise SystemExit(f"File not found: {args.dataset}")
 

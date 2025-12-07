@@ -1,6 +1,63 @@
 import libraries
 from libraries import Dict, List, Tuple, counter, np, nn, CNNClassifier, MLPClassifier, Optional, load_sift_vectors, load_idx_images
 
+def validate_args(args):
+    errors = []
+
+    # Variables of build script
+    if hasattr(args, "knn") and args.knn is not None:
+        if args.knn <= 0:
+            errors.append(f"--knn must be > 0, got {args.knn}")
+
+    if hasattr(args, "m"):
+        if args.m <= 0:
+            errors.append(f"-m (number of blocks) must be > 0, got {args.m}")
+
+    if hasattr(args, "imbalance"):
+        if args.imbalance <= 0:
+            errors.append(f"--imbalance must be > 0, got {args.imbalance}")
+
+    if hasattr(args, "kahip_mode"):
+        if args.kahip_mode not in (0, 1, 2):
+            errors.append(f"--kahip_mode must be 0, 1, or 2, got {args.kahip_mode}")
+
+    if hasattr(args, "layers"):
+        if args.layers < 1:
+            errors.append(f"--layers must be >= 1, got {args.layers}")
+
+    if hasattr(args, "nodes"):
+        if args.nodes <= 0:
+            errors.append(f"--nodes must be > 0, got {args.nodes}")
+
+    if hasattr(args, "epochs"):
+        if args.epochs <= 0:
+            errors.append(f"--epochs must be > 0, got {args.epochs}")
+
+    if hasattr(args, "batch_size"):
+        if args.batch_size <= 0:
+            errors.append(f"--batch_size must be > 0, got {args.batch_size}")
+
+    if hasattr(args, "lr"):
+        if args.lr <= 0:
+            errors.append(f"--lr (learning rate) must be > 0, got {args.lr}")
+
+    # Variables of search script
+    if hasattr(args, "N") and args.N is not None:
+        if args.N <= 0:
+            errors.append(f"-N (number of nearest neighbors) must be > 0, got {args.N}")
+
+    if hasattr(args, "T") and args.T is not None:
+        if args.T <= 0:
+            errors.append(f"-T (number of bins to probe) must be > 0, got {args.T}")
+
+    if errors:
+        print("\nValidation errors:")
+        for err in errors:
+            print(f"  - {err}")
+        print("\nPlease fix the arguments and try again.\n")
+        raise SystemExit(1)
+
+
 def _slug(s: str) -> str:
     """
         Make filesystem-safe short name from arbitrary string.

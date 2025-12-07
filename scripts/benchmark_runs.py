@@ -63,13 +63,8 @@ def slug(s: str) -> str:
     s = s.strip('_')
     return s or 'unknown'
 
-def knngraph_path(dataset: str, knn: int,blocks: int,imbalance: int,kahip_mode: int,layers: int,nodes: int,epochs: int,batch_size: int) -> Path:
-    if imbalance == 0.1:
-        name = f"knngraph_{slug(dataset)}_N{knn}_B{blocks}_I0_1_K_{kahip_mode}_L_{layers}_NOD_{nodes}_E_{epochs}_BS_{batch_size}.txt"
-    if imbalance == 0.03:
-        name = f"knngraph_{slug(dataset)}_N{knn}_B{blocks}_I0_03_K_{kahip_mode}_L_{layers}_NOD_{nodes}_E_{epochs}_BS_{batch_size}.txt"
-    if imbalance == 0.15:
-        name = f"knngraph_{slug(dataset)}_N{knn}_B{blocks}_I0_15_K_{kahip_mode}_L_{layers}_NOD_{nodes}_E_{epochs}_BS_{batch_size}.txt"
+def knngraph_path(dataset: str, knn: int) -> Path:
+    name = f"knngraph_{slug(dataset)}_N{knn}.txt"
     return KNNS_DIR / name
 
 # True neighbors cache paths (metadata path pattern)
@@ -77,47 +72,7 @@ def true_neighbors_meta_path(dataset: str, query: str, N: int) -> Path:
     fname = f"true_neighbors_{slug(dataset)}_{slug(query)}_N{int(N)}.meta.json"
     return TRUE_NEIGH_DIR / fname
 
-# # Run command wrapper
-# def run_cmd(cmd, env=None, cwd=ROOT, timeout=None):
-#     start = time.perf_counter()
-#     process = subprocess.Popen(
-#         cmd,
-#         cwd=cwd,
-#         env=env,
-#         stdout=subprocess.PIPE,
-#         stderr=subprocess.PIPE,
-#         text=True,
-#         bufsize=1  # line-buffered
-#     )
-
-#     stdout_log = []
-#     stderr_log = []
-
-#     try:
-#         # Read stdout/stderr line-by-line as they come
-#         for stream, collector in [
-#             (process.stdout, stdout_log),
-#         ]:
-#             for line in iter(stream.readline, ''):
-#                 print(line, end='')       # <-- LIVE output to your terminal
-#                 collector.append(line)
-
-#         # Wait for process to exit and capture remaining stderr
-#         stderr_output = process.stderr.read()
-#         if stderr_output:
-#             print(stderr_output, end='')  # show errors live
-#             stderr_log.append(stderr_output)
-
-#         rc = process.wait(timeout=timeout)
-#         end = time.perf_counter()
-
-#         return rc, ''.join(stdout_log), ''.join(stderr_log), end - start
-
-#     except subprocess.TimeoutExpired:
-#         process.kill()
-#         return 124, ''.join(stdout_log), ''.join(stderr_log), time.perf_counter() - start
-
-
+# Run command wrapper
 def run_cmd(cmd, env=None, cwd=ROOT, timeout=None):
     start = time.perf_counter()
     try:
@@ -126,8 +81,6 @@ def run_cmd(cmd, env=None, cwd=ROOT, timeout=None):
         return r.returncode, r.stdout, r.stderr, end - start
     except subprocess.TimeoutExpired:
         return 124, '', 'timeout', time.perf_counter() - start
-
-
 
 # Parse metrics from output.txt written by nlsh_search.py
 def parse_search_output(output_file: Path):
@@ -205,7 +158,7 @@ def main():
                 'imbalance': 0.1,
                 'kahip_mode': 0,
                 'layers': 3,
-                'nodes': 128,
+                'nodes': 256,
                 'epochs': 3,
                 'batch_size': 1024
             }
@@ -240,7 +193,7 @@ def main():
                          '--lr', str(DEFAULTS.get('lr', 0.001)),
                          '--seed', str(DEFAULTS.get('seed', 42))]
 
-            knnpath = knngraph_path(DEFAULTS['dataset'], knn,blocks,imbalance,kahip_mode,layers,nodes,epochs,batch_size)
+            knnpath = knngraph_path(DEFAULTS['dataset'], knn)
             KNNS_DIR.mkdir(parents=True, exist_ok=True)
 
             build_time_with = None
@@ -248,35 +201,30 @@ def main():
 
             if args.dry:
                 print('DRY RUN build cmd:', ' '.join(build_cmd))
-                # Force Ivfflat run by removing knngraph (ONLY WHEN USING THE DEFAULTS THIS WILL HAPPEN)
-                if knnpath.exists():
-                    try:
-                        # knnpath.unlink() 
-                        print('HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE')
-                        continue   
-                    except Exception:
-                        pass
-                else:
-                    print('HEEEEEEEEEEEEELLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL')
-                
             else:
-                # Force Ivfflat run by removing knngraph (ONLY WHEN USING THE DEFAULTS THIS WILL HAPPEN)
+                # Force Ivfflat run by removing knngraph
                 if knnpath.exists():
-                    try:
-                        # knnpath.unlink() 
-                        continue   
-                    except Exception:
-                        pass
+                        
+                    print('Running build again (knngraph present) ...')
+                    rc2, out2, err2, bt2 = run_cmd(build_cmd, env=env)
+                    build_time_without = bt2
+                    (ROOT / f'SIFT_build_out_{build_idx}_without.log').write_text(out2 + '\n' + err2)
 
-                print('Running build (with Ivfflat generation) ...')
-                rc, out, err, bt = run_cmd(build_cmd, env=env)
-                build_time_with = bt
-                (ROOT / f'SIFT_build_out_{build_idx}_with.log').write_text(out + '\n' + err)
+                    # try:
+                    #     knnpath.unlink()
+                    # except Exception:
+                    #     pass
+                else :
+                    print(f'Running build (with Ivfflat generation) {knnpath} ...')
+                    rc, out, err, bt = run_cmd(build_cmd, env=env)
+                    build_time_with = bt
+                    (ROOT / f'SIFT_build_out_{build_idx}_with.log').write_text(out + '\n' + err)
 
-                print('Running build again (knngraph present) ...')
-                rc2, out2, err2, bt2 = run_cmd(build_cmd, env=env)
-                build_time_without = bt2
-                (ROOT / f'SIFT_build_out_{build_idx}_without.log').write_text(out2 + '\n' + err2)
+                    
+                    print('Running build again (knngraph present) ...')
+                    rc2, out2, err2, bt2 = run_cmd(build_cmd, env=env)
+                    build_time_without = bt2
+                    (ROOT / f'SIFT_build_out_{build_idx}_without.log').write_text(out2 + '\n' + err2)
 
             # Run searches for all T values for this build
             for T in T_LIST:
