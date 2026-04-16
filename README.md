@@ -2,8 +2,8 @@
 
 ## **Authors:**  
 
-- _Lytra Maria - 1115202200089_
-- _Mylonaki Danai - 1115202200114_
+- Lytra Maria
+- Mylonaki Danai
 
 ## Main idea
 
@@ -11,6 +11,10 @@ In this project we implemented the following algorithm:
 
 - **Locality sensitive Hashing using Neural  Classifiers**
 The way this algorithm works is by computing a graph with the k-nearest neighbors and then using a graph partitioner, such as KaHIP, to provide a locality-sensitive division of the data space. This information is then used to train a neural classifier to predict partition (block) assignments for vectors so that at query time the model maps a query to a small set of candidate partitions (top‑T); those candidates are then re-ranked with exact distances to produce the final K nearest neighbours.
+
+## Dataset Structure
+
+For more details about the dataset structure, see [datasets.md](datasets.md).
 
 ## Project Structure
 
