@@ -1,6 +1,6 @@
 # Approximate Nearest Neighbor Search using Neural Network Classifiers
 
-## **Authors:**  
+## **Authors**  
 
 - **Lytra Maria** — [GitHub](https://github.com/marialitra)
 - **Mylonaki Danai** — [GitHub](https://github.com/PoiLson)
