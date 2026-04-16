@@ -2,8 +2,8 @@
 
 ## **Authors:**  
 
-- Lytra Maria
-- Mylonaki Danai
+- **Lytra Maria** — [GitHub](https://github.com/marialitra)
+- **Mylonaki Danai** — [GitHub](https://github.com/PoiLson)
 
 ## Main idea
 
