@@ -7,10 +7,15 @@
 
 ## Main idea
 
-In this project we implemented the following algorithm:
+This project is a continuation of Part 1, where we implemented classical Approximate Nearest Neighbor (ANN) search algorithms.
+
+In this part, we extend that work by introducing a learning-based approach:
 
 - **Locality sensitive Hashing using Neural  Classifiers**
 The way this algorithm works is by computing a graph with the k-nearest neighbors and then using a graph partitioner, such as KaHIP, to provide a locality-sensitive division of the data space. This information is then used to train a neural classifier to predict partition (block) assignments for vectors so that at query time the model maps a query to a small set of candidate partitions (top‑T); those candidates are then re-ranked with exact distances to produce the final K nearest neighbours.
+
+For the implementation and detailed description of the algorithms from Part 1, see:
+[ANN Search Algorithms Part 1](https://github.com/PoiLson/ann-search-algorithms-part1)
 
 ## Dataset Structure
 
